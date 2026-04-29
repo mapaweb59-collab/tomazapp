@@ -9,9 +9,10 @@ export async function scheduleAppointment(req: AppointmentRequest): Promise<Appo
   const existing = await findByIdempotencyKey(req.idempotencyKey);
   if (existing) return existing;
 
-  const calendarId = req.professionalId ?? 'primary';
+  const calendarId = req.professionalCalendarId ?? 'primary';
+  const duration = req.durationMinutes ?? 60;
 
-  const available = await checkSlotAvailability(req.requestedAt, calendarId);
+  const available = await checkSlotAvailability(req.requestedAt, duration, calendarId);
   if (!available) throw new Error('SLOT_UNAVAILABLE');
 
   const nexfitEligible = await checkEligibility(req.customerId);
@@ -20,14 +21,16 @@ export async function scheduleAppointment(req: AppointmentRequest): Promise<Appo
     customerId: req.customerId,
     serviceType: req.serviceType,
     scheduledAt: req.requestedAt,
+    durationMinutes: duration,
     calendarId,
+    professionalName: req.professionalName,
   });
 
   const appointment = await createAppointment({
     customer_id: req.customerId,
     service_type: req.serviceType,
     scheduled_at: req.requestedAt,
-    duration_minutes: 60,
+    duration_minutes: duration,
     status: 'confirmed',
     gcal_event_id: gcalEvent.id,
     nexfit_eligible: nexfitEligible,
@@ -42,14 +45,11 @@ export async function scheduleAppointment(req: AppointmentRequest): Promise<Appo
     after_state: appointment,
   });
 
-  // Schedule 24h-before reminder (fire-and-forget, non-critical)
-  const scheduledAt = new Date(req.requestedAt).getTime();
-  const reminderAt = scheduledAt - 24 * 60 * 60 * 1000;
-  const delay = reminderAt - Date.now();
-  if (delay > 0) {
+  const reminderDelay = new Date(req.requestedAt).getTime() - 24 * 60 * 60 * 1000 - Date.now();
+  if (reminderDelay > 0) {
     reminderQueue
       .add('appointment-reminder', { appointmentId: appointment.id }, {
-        delay,
+        delay: reminderDelay,
         jobId: `reminder-${appointment.id}`,
       })
       .catch(() => {});

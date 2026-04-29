@@ -5,8 +5,9 @@ export interface AppointmentRequest {
   serviceType: string;
   requestedAt: string;
   idempotencyKey: string;
-  gcalSlotId?: string;
-  professionalId?: string;
+  durationMinutes?: number;
+  professionalCalendarId?: string; // calendário próprio do profissional ou compartilhado
+  professionalName?: string;
 }
 
 export interface Appointment {

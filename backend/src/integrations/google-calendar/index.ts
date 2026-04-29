@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { TenantScheduleConfig } from '../../domains/tenants/tenant.service';
 
 const auth = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -10,9 +11,10 @@ auth.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
 
 const calendar = google.calendar({ version: 'v3', auth });
 
-// UTC-3 (Brasília)
+// UTC-3 (Brasília) — fuso padrão. Usar Intl quando tenant tiver timezone próprio.
 const TZ_OFFSET_MS = -3 * 60 * 60 * 1000;
-const DAYS_PT = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+const DAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
 function toLocal(utcDate: Date): Date {
   return new Date(utcDate.getTime() + TZ_OFFSET_MS);
@@ -29,20 +31,54 @@ function formatSlotLabel(utcDate: Date): string {
   return `${dayName}, ${day}/${month} às ${hour}h${minStr}`;
 }
 
+// Fallback quando tenant não tem business_hours configurado
+const DEFAULT_BUSINESS_HOURS: TenantScheduleConfig['businessHours'] = {
+  mon: { open: '08:00', close: '20:00' },
+  tue: { open: '08:00', close: '20:00' },
+  wed: { open: '08:00', close: '20:00' },
+  thu: { open: '08:00', close: '20:00' },
+  fri: { open: '08:00', close: '20:00' },
+  sat: null,
+  sun: null,
+};
+
+function getBusinessHoursForDay(
+  localDate: Date,
+  businessHours: TenantScheduleConfig['businessHours'],
+): { openH: number; openM: number; closeH: number; closeM: number } | null {
+  const dayKey = DAY_KEYS[localDate.getUTCDay()];
+  const hours = businessHours[dayKey] ?? null;
+  if (!hours) return null;
+
+  const [openH, openM] = hours.open.split(':').map(Number);
+  const [closeH, closeM] = hours.close.split(':').map(Number);
+  return { openH, openM, closeH, closeM };
+}
+
 export interface AvailableSlot {
   label: string;
   iso: string;
 }
 
-export async function listAvailableSlots(
-  calendarId: string = 'primary',
-  durationMinutes: number = 60,
-  daysAhead: number = 7,
-  businessHoursStart: number = 8,
-  businessHoursEnd: number = 20,
-  slotIntervalMinutes: number = 60,
-  maxSlots: number = 5,
-): Promise<AvailableSlot[]> {
+export interface ListSlotsOptions {
+  calendarId?: string;
+  durationMinutes?: number;
+  daysAhead?: number;
+  slotIntervalMinutes?: number;
+  maxSlots?: number;
+  businessHours?: TenantScheduleConfig['businessHours'];
+}
+
+export async function listAvailableSlots(options: ListSlotsOptions = {}): Promise<AvailableSlot[]> {
+  const {
+    calendarId = 'primary',
+    durationMinutes = 60,
+    daysAhead = 7,
+    slotIntervalMinutes = 60,
+    maxSlots = 5,
+    businessHours = DEFAULT_BUSINESS_HOURS,
+  } = options;
+
   const now = new Date();
   const timeMax = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
 
@@ -61,51 +97,49 @@ export async function listAvailableSlots(
 
   const slots: AvailableSlot[] = [];
 
-  // Começa na próxima hora cheia a partir de agora (horário local)
-  const cursor = new Date(now);
+  // Começa na próxima hora cheia (mínimo 30min no futuro)
+  const cursor = new Date(now.getTime() + 30 * 60 * 1000);
   cursor.setMinutes(0, 0, 0);
-  cursor.setTime(cursor.getTime() + 60 * 60 * 1000);
-
-  // Ajusta para o início do horário comercial se necessário
-  const localCursor = toLocal(cursor);
-  if (localCursor.getUTCHours() < businessHoursStart) {
-    cursor.setTime(cursor.getTime() + (businessHoursStart - localCursor.getUTCHours()) * 60 * 60 * 1000);
-  }
+  cursor.setTime(cursor.getTime() + slotIntervalMinutes * 60 * 1000);
 
   while (cursor < timeMax && slots.length < maxSlots) {
     const local = toLocal(cursor);
-    const localHour = local.getUTCHours();
+    const dayHours = getBusinessHoursForDay(local, businessHours);
 
-    // Pula finais de semana (0 = domingo, 6 = sábado)
-    const localDay = local.getUTCDay();
-    if (localDay === 0 || localDay === 6) {
-      cursor.setTime(cursor.getTime() + 24 * 60 * 60 * 1000);
-      const nextLocal = toLocal(cursor);
-      cursor.setTime(cursor.getTime() - nextLocal.getUTCHours() * 60 * 60 * 1000 - nextLocal.getUTCMinutes() * 60 * 1000);
-      cursor.setTime(cursor.getTime() + businessHoursStart * 60 * 60 * 1000);
+    if (!dayHours) {
+      // Dia fechado — pula para meia-noite do próximo dia (local) e continua
+      const nextDay = new Date(local.getTime() + 24 * 60 * 60 * 1000);
+      nextDay.setUTCHours(0, 0, 0, 0);
+      cursor.setTime(nextDay.getTime() - TZ_OFFSET_MS);
       continue;
     }
 
-    if (localHour >= businessHoursEnd) {
-      // Pula para o próximo dia
-      cursor.setTime(cursor.getTime() + 24 * 60 * 60 * 1000);
-      const nextLocal = toLocal(cursor);
-      cursor.setTime(cursor.getTime() - nextLocal.getUTCHours() * 60 * 60 * 1000 - nextLocal.getUTCMinutes() * 60 * 1000);
-      cursor.setTime(cursor.getTime() + businessHoursStart * 60 * 60 * 1000);
+    const localMinutes = local.getUTCHours() * 60 + local.getUTCMinutes();
+    const openMinutes = dayHours.openH * 60 + dayHours.openM;
+    const closeMinutes = dayHours.closeH * 60 + dayHours.closeM;
+
+    if (localMinutes < openMinutes) {
+      // Antes da abertura — avança para a abertura
+      const diff = (openMinutes - localMinutes) * 60 * 1000;
+      cursor.setTime(cursor.getTime() + diff);
       continue;
     }
 
-    if (localHour >= businessHoursStart) {
-      const slotStart = cursor.getTime();
-      const slotEnd = slotStart + durationMinutes * 60 * 1000;
-      const isBusy = busyPeriods.some(b => slotStart < b.end && slotEnd > b.start);
+    if (localMinutes >= closeMinutes - durationMinutes) {
+      // Após o fechamento (ou slot não cabe) — pula para abertura do próximo dia
+      const nextDay = new Date(local.getTime() + 24 * 60 * 60 * 1000);
+      nextDay.setUTCHours(0, 0, 0, 0);
+      cursor.setTime(nextDay.getTime() - TZ_OFFSET_MS);
+      continue;
+    }
 
-      if (!isBusy) {
-        slots.push({
-          label: formatSlotLabel(cursor),
-          iso: cursor.toISOString(),
-        });
-      }
+    // Slot dentro do horário comercial — checa ocupação
+    const slotStart = cursor.getTime();
+    const slotEnd = slotStart + durationMinutes * 60 * 1000;
+    const isBusy = busyPeriods.some(b => slotStart < b.end && slotEnd > b.start);
+
+    if (!isBusy) {
+      slots.push({ label: formatSlotLabel(cursor), iso: cursor.toISOString() });
     }
 
     cursor.setTime(cursor.getTime() + slotIntervalMinutes * 60 * 1000);
@@ -116,13 +150,17 @@ export async function listAvailableSlots(
 
 export function formatSlotsForPrompt(slots: AvailableSlot[]): string {
   if (!slots.length) return '';
-  return slots
-    .map((s, i) => `${i + 1}. ${s.label} → ${s.iso}`)
-    .join('\n');
+  return slots.map((s, i) => `${i + 1}. ${s.label} → ${s.iso}`).join('\n');
 }
 
-export async function checkSlotAvailability(startTime: string, calendarId = 'primary'): Promise<boolean> {
-  const endTime = new Date(new Date(startTime).getTime() + 60 * 60 * 1000).toISOString();
+export async function checkSlotAvailability(
+  startTime: string,
+  durationMinutes: number,
+  calendarId = 'primary',
+): Promise<boolean> {
+  const endTime = new Date(
+    new Date(startTime).getTime() + durationMinutes * 60 * 1000,
+  ).toISOString();
 
   const { data } = await calendar.freebusy.query({
     requestBody: {
@@ -132,8 +170,7 @@ export async function checkSlotAvailability(startTime: string, calendarId = 'pri
     },
   });
 
-  const busy = data.calendars?.[calendarId]?.busy ?? [];
-  return busy.length === 0;
+  return (data.calendars?.[calendarId]?.busy ?? []).length === 0;
 }
 
 export async function createEvent(params: {
@@ -145,7 +182,9 @@ export async function createEvent(params: {
   professionalName?: string;
 }): Promise<{ id: string }> {
   const duration = params.durationMinutes ?? 60;
-  const endTime = new Date(new Date(params.scheduledAt).getTime() + duration * 60 * 1000).toISOString();
+  const endTime = new Date(
+    new Date(params.scheduledAt).getTime() + duration * 60 * 1000,
+  ).toISOString();
 
   const { data } = await calendar.events.insert({
     calendarId: params.calendarId ?? 'primary',

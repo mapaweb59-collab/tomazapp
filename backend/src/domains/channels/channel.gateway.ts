@@ -20,6 +20,7 @@ import {
   getDefaultTenantId,
   loadProfissionais,
   getTenantConfigValue,
+  getTenantScheduleConfig,
   getServicePrice,
 } from '../tenants/tenant.service';
 import { Profissional } from '../ai/ai.types';
@@ -40,11 +41,21 @@ function findProfissional(
 async function fetchSlots(
   profissionalNome: string | null,
   profissionais: Profissional[],
+  scheduleConfig: Awaited<ReturnType<typeof getTenantScheduleConfig>>,
 ): Promise<string> {
   try {
     const prof = findProfissional(profissionalNome, profissionais);
-    const calendarId = prof?.gcalCalendarId ?? 'primary';
-    const slots = await listAvailableSlots(calendarId, 60, 7);
+    const calendarId = prof?.gcalCalendarId ?? scheduleConfig.sharedCalendarId;
+    // Horário do profissional tem prioridade; fallback para o horário do tenant
+    const businessHours = prof?.businessHours ?? scheduleConfig.businessHours;
+    const slots = await listAvailableSlots({
+      calendarId,
+      durationMinutes: scheduleConfig.durationMinutes,
+      slotIntervalMinutes: scheduleConfig.slotIntervalMinutes,
+      businessHours,
+      daysAhead: 7,
+      maxSlots: 5,
+    });
     return formatSlotsForPrompt(slots);
   } catch {
     return '';
@@ -76,13 +87,14 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       idempotency_key: msg.id,
     });
 
-    const [ragContext, conversationHistory, profissionais, assistantName, studioName] =
+    const [ragContext, conversationHistory, profissionais, assistantName, studioName, scheduleConfig] =
       await Promise.all([
         retrieveContext(tenantId, msg.text),
         getRecentMessages(conversation.id, 10),
         loadProfissionais(tenantId),
         getTenantConfigValue(tenantId, 'bot.name'),
         getTenantConfigValue(tenantId, 'bot.studio_name'),
+        getTenantScheduleConfig(tenantId),
       ]);
 
     const ctx = conversation.context;
@@ -91,7 +103,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       (ctx.profissional && ctx.modalidade);
 
     const availableSlots = shouldFetchSlots
-      ? await fetchSlots(ctx.profissional, profissionais)
+      ? await fetchSlots(ctx.profissional, profissionais, scheduleConfig)
       : '';
 
     const botResponse = await generateBotResponse(msg.text, {
@@ -131,7 +143,9 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
           serviceType: newState.modalidade ?? newState.profissional ?? 'Aula',
           requestedAt: newState.horario,
           idempotencyKey: newState.idempotencyKey,
-          professionalId: prof?.gcalCalendarId,
+          durationMinutes: scheduleConfig.durationMinutes,
+          professionalCalendarId: prof?.gcalCalendarId ?? scheduleConfig.sharedCalendarId,
+          professionalName: prof?.nome,
         });
 
         if (botResponse.triggerPayment && appointment) {

@@ -17,9 +17,11 @@ export async function createProfissional(slug: string, formData: FormData) {
   const aliases = (formData.get('aliases') as string).split(',').map(s => s.trim()).filter(Boolean);
   const specialties = (formData.get('specialties') as string).split(',').map(s => s.trim()).filter(Boolean);
   const gcal = (formData.get('gcal_calendar_id') as string) || undefined;
+  const businessHoursRaw = formData.get('business_hours') as string | null;
+  const business_hours = businessHoursRaw ? JSON.parse(businessHoursRaw) : null;
 
   await api.post(`/api/tenants/${tenantId}/professionals`, {
-    name, aliases, specialties, gcal_calendar_id: gcal,
+    name, aliases, specialties, gcal_calendar_id: gcal, business_hours,
   });
 
   revalidatePath(`/${slug}/profissionais`);
@@ -34,7 +36,13 @@ export async function toggleProfissional(slug: string, id: string, active: boole
 export async function updateProfissional(
   slug: string,
   id: string,
-  data: { name: string; aliases: string[]; specialties: string[]; gcal_calendar_id?: string },
+  data: {
+    name: string;
+    aliases: string[];
+    specialties: string[];
+    gcal_calendar_id?: string;
+    business_hours?: Record<string, { open: string; close: string } | null>;
+  },
 ) {
   const tenantId = await getTenantId(slug);
   await api.patch(`/api/tenants/${tenantId}/professionals/${id}`, data);

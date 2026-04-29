@@ -33,6 +33,7 @@ export interface Profissional {
   apelidos: string[];
   especialidades: string[];
   gcalCalendarId?: string;
+  businessHours?: Record<string, { open: string; close: string } | null>;
 }
 
 export interface PromptContext {
