@@ -5,8 +5,8 @@ const client = axios.create({
   headers: { api_access_token: process.env.CHATWOOT_API_KEY },
 });
 
-const accountId = () => process.env.CHATWOOT_ACCOUNT_ID;
-const inboxId = () => process.env.CHATWOOT_INBOX_ID;
+const accountId = () => Number(process.env.CHATWOOT_ACCOUNT_ID);
+const inboxId = () => Number(process.env.CHATWOOT_INBOX_ID);
 
 export async function sendMessage(conversationId: string, content: string): Promise<void> {
   await client.post(
@@ -34,7 +34,7 @@ export async function findOrCreateContact(phone: string, name?: string): Promise
 
 export async function createChatwootConversation(contactId: string): Promise<string> {
   const res = await client.post(`/accounts/${accountId()}/conversations`, {
-    contact_id: contactId,
+    contact_id: Number(contactId),
     inbox_id: inboxId(),
   });
 
@@ -45,7 +45,5 @@ export async function assignAgent(conversationId: string): Promise<void> {
   await client.post(
     `/accounts/${accountId()}/conversations/${conversationId}/assignments`,
     {},
-  ).catch(() => {
-    // Silently ignore if no agents are available to assign
-  });
+  ).catch(() => {});
 }
