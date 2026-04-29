@@ -102,11 +102,11 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       ctx.fase === 'coletar_horario' ||
       (ctx.profissional && ctx.modalidade);
 
-    const availableSlots = shouldFetchSlots
+    let availableSlots = shouldFetchSlots
       ? await fetchSlots(ctx.profissional, profissionais, scheduleConfig)
       : '';
 
-    const botResponse = await generateBotResponse(msg.text, {
+    let botResponse = await generateBotResponse(msg.text, {
       assistantName: assistantName ?? 'Sofia',
       studioName: studioName ?? 'Studio',
       profissionais,
@@ -127,6 +127,24 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       horario: extraido.horario ?? conversation.context.horario,
       nomeCliente: extraido.nomeCliente ?? conversation.context.nomeCliente,
     };
+
+    // Se o LLM decidiu mostrar horários mas não tinha slots na primeira chamada,
+    // busca os slots agora (usando o profissional recém-extraído) e re-chama o LLM.
+    if (botResponse.fase === 'coletar_horario' && !availableSlots && newState.profissional) {
+      availableSlots = await fetchSlots(newState.profissional, profissionais, scheduleConfig);
+      if (availableSlots) {
+        botResponse = await generateBotResponse(msg.text, {
+          assistantName: assistantName ?? 'Sofia',
+          studioName: studioName ?? 'Studio',
+          profissionais,
+          conversationState: JSON.stringify(newState),
+          conversationHistory,
+          availableSlots,
+          ragContext,
+          customerData: JSON.stringify(identity),
+        });
+      }
+    }
 
     if (botResponse.triggerHandoff) {
       await transferToHuman(conversation.id, newState);
