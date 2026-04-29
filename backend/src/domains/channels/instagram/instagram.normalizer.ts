@@ -1,4 +1,4 @@
-import { ChannelMessage } from '../../../../shared/types/channel-message';
+import { ChannelMessage } from '../../../types/channel-message';
 
 interface MetaMessagingEntry {
   id: string;

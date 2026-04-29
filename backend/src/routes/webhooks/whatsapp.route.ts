@@ -14,7 +14,7 @@ export async function whatsappWebhookRoutes(app: FastifyInstance): Promise<void>
     await markProcessed(eventId);
 
     const msg = normalizeMegaApiPayload(
-      payload as Parameters<typeof normalizeMegaApiPayload>[0],
+      payload as unknown as Parameters<typeof normalizeMegaApiPayload>[0],
     );
 
     if (!msg) return reply.status(200).send({ skipped: 'fromMe' });
