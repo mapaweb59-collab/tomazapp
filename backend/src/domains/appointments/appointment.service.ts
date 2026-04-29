@@ -5,10 +5,14 @@ import { checkEligibility } from '../../integrations/nexfit';
 import { logAudit } from '../audit/audit.service';
 
 export async function scheduleAppointment(req: AppointmentRequest): Promise<Appointment> {
+  // Idempotência — retorna se já foi criado
   const existing = await findByIdempotencyKey(req.idempotencyKey);
   if (existing) return existing;
 
-  const available = await checkSlotAvailability(req.requestedAt, req.professionalId);
+  const calendarId = req.professionalId ?? 'primary';
+
+  // Verifica disponibilidade antes de criar
+  const available = await checkSlotAvailability(req.requestedAt, calendarId);
   if (!available) throw new Error('SLOT_UNAVAILABLE');
 
   const nexfitEligible = await checkEligibility(req.customerId);
@@ -17,7 +21,7 @@ export async function scheduleAppointment(req: AppointmentRequest): Promise<Appo
     customerId: req.customerId,
     serviceType: req.serviceType,
     scheduledAt: req.requestedAt,
-    professionalId: req.professionalId,
+    calendarId,
   });
 
   const appointment = await createAppointment({

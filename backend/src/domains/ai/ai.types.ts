@@ -28,10 +28,11 @@ export interface BotResponse {
 }
 
 export interface Profissional {
+  id: string;
   nome: string;
   apelidos: string[];
   especialidades: string[];
-  disponibilidade?: string;
+  gcalCalendarId?: string;
 }
 
 export interface PromptContext {

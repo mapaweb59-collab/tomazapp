@@ -18,14 +18,16 @@ export async function getDefaultTenantId(): Promise<string> {
 export async function loadProfissionais(tenantId: string): Promise<Profissional[]> {
   const { data } = await supabase
     .from('professionals')
-    .select('name, aliases, specialties')
+    .select('id, name, aliases, specialties, gcal_calendar_id')
     .eq('tenant_id', tenantId)
     .eq('active', true);
 
   return (data ?? []).map(p => ({
+    id: p.id,
     nome: p.name,
     apelidos: p.aliases as string[],
     especialidades: p.specialties as string[],
+    gcalCalendarId: p.gcal_calendar_id ?? undefined,
   }));
 }
 

@@ -84,8 +84,9 @@ REGRAS ABSOLUTAS:
 10. Apresente horários em lista numerada, máximo 3 opções.
 11. Se fase for "confirmar", não pergunte mais nada — apenas confirme os dados e aguarde resposta do cliente.
 12. Se cliente não especificou profissional, pergunte PRIMEIRO o profissional antes de qualquer outra coisa.
-13. SELEÇÃO DE HORÁRIO — CRÍTICO: Se na sua última mensagem do histórico você listou opções e o cliente escolheu uma (ex: "segunda", "a primeira", "pode ser", "quero a 2"), identifique o horário EXATO que você ofereceu, salve em extraido.horario e avance para fase "confirmar". NUNCA re-liste as opções depois que o cliente escolheu.
-14. LOOP PROIBIDO: Se o cliente acabou de responder a uma pergunta sua, avance na conversa. NUNCA repita a mesma pergunta ou lista que você acabou de enviar.`);
+13. SELEÇÃO DE HORÁRIO — CRÍTICO: Se na sua última mensagem do histórico você listou opções e o cliente escolheu uma (ex: "segunda", "a primeira", "pode ser", "quero a 2"), identifique o horário EXATO que você ofereceu, salve em extraido.horario o datetime ISO (após →) e avance para fase "confirmar". NUNCA re-liste as opções depois que o cliente escolheu.
+14. LOOP PROIBIDO: Se o cliente acabou de responder a uma pergunta sua, avance na conversa. NUNCA repita a mesma pergunta ou lista que você acabou de enviar.
+15. FORMATO DO HORARIO: quando salvar extraido.horario, use SEMPRE o datetime ISO exato do slot (ex: "2026-05-05T10:00:00.000Z"), nunca texto como "segunda às 10h".`);
 
   return sections.join('\n\n');
 }

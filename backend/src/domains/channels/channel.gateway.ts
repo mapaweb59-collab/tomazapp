@@ -12,9 +12,38 @@ import { retrieveContext } from '../ai/rag.service';
 import { scheduleAppointment } from '../appointments/appointment.service';
 import { sendMessage, assignAgent } from '../../integrations/chatwoot';
 import { sendWhatsAppMessage } from './whatsapp/whatsapp.sender';
+import { listAvailableSlots, formatSlotsForPrompt } from '../../integrations/google-calendar';
 import { logIncident } from '../incidents/incident.service';
 import { pushToDLQ } from '../dlq/dlq.service';
 import { getDefaultTenantId, loadProfissionais, getTenantConfigValue } from '../tenants/tenant.service';
+import { Profissional } from '../ai/ai.types';
+
+function findProfissional(
+  nome: string | null,
+  profissionais: Profissional[],
+): Profissional | undefined {
+  if (!nome) return undefined;
+  const lower = nome.toLowerCase();
+  return profissionais.find(
+    p =>
+      p.nome.toLowerCase() === lower ||
+      p.apelidos.some(a => a.toLowerCase() === lower),
+  );
+}
+
+async function fetchSlots(
+  profissionalNome: string | null,
+  profissionais: Profissional[],
+): Promise<string> {
+  try {
+    const prof = findProfissional(profissionalNome, profissionais);
+    const calendarId = prof?.gcalCalendarId ?? 'primary';
+    const slots = await listAvailableSlots(calendarId, 60, 7);
+    return formatSlotsForPrompt(slots);
+  } catch {
+    return '';
+  }
+}
 
 export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ reply: string } | null> {
   try {
@@ -50,13 +79,23 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
         getTenantConfigValue(tenantId, 'bot.studio_name'),
       ]);
 
+    // Busca slots quando já temos profissional + modalidade ou estamos na fase de horário
+    const ctx = conversation.context;
+    const shouldFetchSlots =
+      ctx.fase === 'coletar_horario' ||
+      (ctx.profissional && ctx.modalidade);
+
+    const availableSlots = shouldFetchSlots
+      ? await fetchSlots(ctx.profissional, profissionais)
+      : '';
+
     const botResponse = await generateBotResponse(msg.text, {
-      assistantName: assistantName ?? process.env.ASSISTANT_NAME ?? 'Sofia',
-      studioName: studioName ?? process.env.STUDIO_NAME ?? 'Studio',
+      assistantName: assistantName ?? 'Sofia',
+      studioName: studioName ?? 'Studio',
       profissionais,
       conversationState: JSON.stringify(conversation.context),
       conversationHistory,
-      availableSlots: '',
+      availableSlots,
       ragContext,
       customerData: JSON.stringify(identity),
     });
@@ -74,26 +113,33 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
 
     if (botResponse.triggerHandoff) {
       await transferToHuman(conversation.id, newState);
-      await assignAgent(conversation.chatwoot_conversation_id!);
+      await assignAgent(conversation.chatwoot_conversation_id!).catch(() => {});
     } else {
       await saveContext(conversation.id, newState);
     }
 
-    if (botResponse.triggerConfirmacao) {
+    if (botResponse.triggerConfirmacao && newState.horario) {
+      const prof = findProfissional(newState.profissional, profissionais);
       await scheduleAppointment({
         customerId: identity.id,
-        serviceType: newState.modalidade ?? '',
-        requestedAt: newState.horario ?? '',
+        serviceType: newState.modalidade ?? newState.profissional ?? 'Aula',
+        requestedAt: newState.horario,
         idempotencyKey: newState.idempotencyKey,
+        professionalId: prof?.gcalCalendarId,
+      }).catch(err => {
+        // Slot tomado — reverte fase para coletar_horario
+        if (err.message === 'SLOT_UNAVAILABLE') {
+          saveContext(conversation.id, { ...newState, fase: 'coletar_horario', horario: null });
+        }
       });
     }
 
-    // Envia resposta diretamente via Mega API (entrega garantida ao WhatsApp)
+    // Envia resposta diretamente via Mega API
     if (msg.channel === 'whatsapp') {
       await sendWhatsAppMessage(msg.from, botResponse.message);
     }
 
-    // Espelha no Chatwoot para visibilidade do agente (não crítico)
+    // Espelha no Chatwoot (não crítico)
     if (conversation.chatwoot_conversation_id) {
       await sendMessage(conversation.chatwoot_conversation_id, botResponse.message).catch(() => {});
     }
