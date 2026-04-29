@@ -32,12 +32,15 @@ export async function ensureChatwootConversation(
 ): Promise<Conversation> {
   if (conversation.chatwoot_conversation_id) return conversation;
 
-  const contactId = await findOrCreateContact(phone, name);
-  const chatwootConversationId = await createChatwootConversation(contactId);
-
-  await updateChatwootId(conversation.id, chatwootConversationId);
-
-  return { ...conversation, chatwoot_conversation_id: chatwootConversationId };
+  try {
+    const contactId = await findOrCreateContact(phone, name);
+    const chatwootConversationId = await createChatwootConversation(contactId);
+    await updateChatwootId(conversation.id, chatwootConversationId);
+    return { ...conversation, chatwoot_conversation_id: chatwootConversationId };
+  } catch {
+    // Chatwoot indisponível — bot continua funcionando sem espelhamento
+    return conversation;
+  }
 }
 
 export async function saveContext(id: string, state: ConversationState): Promise<void> {

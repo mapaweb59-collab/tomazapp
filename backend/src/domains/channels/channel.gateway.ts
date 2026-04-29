@@ -11,6 +11,7 @@ import { generateBotResponse } from '../ai/ai.service';
 import { retrieveContext } from '../ai/rag.service';
 import { scheduleAppointment } from '../appointments/appointment.service';
 import { sendMessage, assignAgent } from '../../integrations/chatwoot';
+import { sendWhatsAppMessage } from './whatsapp/whatsapp.sender';
 import { logIncident } from '../incidents/incident.service';
 import { pushToDLQ } from '../dlq/dlq.service';
 import { getDefaultTenantId, loadProfissionais, getTenantConfigValue } from '../tenants/tenant.service';
@@ -85,7 +86,15 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<void> 
       });
     }
 
-    await sendMessage(conversation.chatwoot_conversation_id!, botResponse.message);
+    // Envia resposta diretamente via Mega API (entrega garantida ao WhatsApp)
+    if (msg.channel === 'whatsapp') {
+      await sendWhatsAppMessage(msg.from, botResponse.message);
+    }
+
+    // Espelha no Chatwoot para visibilidade do agente (não crítico)
+    if (conversation.chatwoot_conversation_id) {
+      await sendMessage(conversation.chatwoot_conversation_id, botResponse.message).catch(() => {});
+    }
 
     await saveMessage({
       conversation_id: conversation.id,
