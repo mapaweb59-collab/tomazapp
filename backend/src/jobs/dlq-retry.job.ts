@@ -1,9 +1,9 @@
 import { Queue, Worker } from 'bullmq';
-import { createBullConnection } from '../lib/redis';
+import { queueConnection, createWorkerConnection } from '../lib/redis';
 import { supabase } from '../lib/supabase';
 import { replayEvent } from '../domains/dlq/dlq.service';
 
-export const dlqRetryQueue = new Queue('dlq-retry', { connection: createBullConnection() });
+export const dlqRetryQueue = new Queue('dlq-retry', { connection: queueConnection });
 
 export const dlqRetryWorker = new Worker(
   'dlq-retry',
@@ -20,5 +20,5 @@ export const dlqRetryWorker = new Worker(
       await replayEvent(event.id);
     }
   },
-  { connection: createBullConnection() },
+  { connection: createWorkerConnection() },
 );

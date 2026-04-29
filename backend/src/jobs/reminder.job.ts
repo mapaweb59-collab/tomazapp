@@ -1,10 +1,10 @@
 import { Queue, Worker } from 'bullmq';
-import { createBullConnection } from '../lib/redis';
+import { queueConnection, createWorkerConnection } from '../lib/redis';
 import { supabase } from '../lib/supabase';
 import { sendWhatsAppMessage } from '../domains/channels/whatsapp/whatsapp.sender';
 import { sendMessage } from '../integrations/chatwoot';
 
-export const reminderQueue = new Queue('reminders', { connection: createBullConnection() });
+export const reminderQueue = new Queue('reminders', { connection: queueConnection });
 
 export const reminderWorker = new Worker(
   'reminders',
@@ -28,7 +28,6 @@ export const reminderWorker = new Worker(
       await sendWhatsAppMessage(phone, text).catch(() => {});
     }
 
-    // Mirror to Chatwoot if available (non-critical)
     const { data: conv } = await supabase
       .from('conversations')
       .select('chatwoot_conversation_id')
@@ -41,5 +40,5 @@ export const reminderWorker = new Worker(
       await sendMessage(conv.chatwoot_conversation_id, text).catch(() => {});
     }
   },
-  { connection: createBullConnection() },
+  { connection: createWorkerConnection() },
 );

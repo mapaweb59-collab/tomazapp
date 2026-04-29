@@ -1,9 +1,9 @@
 import { Queue, Worker } from 'bullmq';
-import { createBullConnection } from '../lib/redis';
+import { queueConnection, createWorkerConnection } from '../lib/redis';
 import { syncNotionToVectors } from '../domains/ai/rag.service';
 import { logIncident } from '../domains/incidents/incident.service';
 
-export const ragSyncQueue = new Queue('rag-sync', { connection: createBullConnection() });
+export const ragSyncQueue = new Queue('rag-sync', { connection: queueConnection });
 
 export const ragSyncWorker = new Worker(
   'rag-sync',
@@ -11,7 +11,7 @@ export const ragSyncWorker = new Worker(
     await syncNotionToVectors(job.data.tenantId);
   },
   {
-    connection: createBullConnection(),
+    connection: createWorkerConnection(),
     concurrency: 1,
   },
 );
