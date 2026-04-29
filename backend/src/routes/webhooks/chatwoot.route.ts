@@ -4,9 +4,17 @@ import { supabase } from '../../lib/supabase';
 
 export async function chatwootWebhookRoutes(app: FastifyInstance): Promise<void> {
   app.post('/webhooks/chatwoot', async (req, reply) => {
-    const body = req.body as { event: string; conversation?: { id: string } };
+    const body = req.body as {
+      event: string;
+      status?: string;
+      conversation?: { id: string; status?: string };
+    };
 
-    if (body.event === 'conversation_resolved' && body.conversation?.id) {
+    const isResolved =
+      body.event === 'conversation_status_changed' &&
+      (body.conversation?.status === 'resolved' || body.status === 'resolved');
+
+    if (isResolved && body.conversation?.id) {
       const chatwootId = String(body.conversation.id);
 
       const { data } = await supabase
