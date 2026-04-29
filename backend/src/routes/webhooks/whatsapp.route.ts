@@ -19,7 +19,7 @@ export async function whatsappWebhookRoutes(app: FastifyInstance): Promise<void>
 
     if (!msg) return reply.status(200).send({ skipped: 'fromMe' });
 
-    await handleIncomingMessage(msg);
-    return reply.status(200).send({ ok: true });
+    const result = await handleIncomingMessage(msg);
+    return reply.status(200).send({ ok: true, ...(result ?? {}) });
   });
 }

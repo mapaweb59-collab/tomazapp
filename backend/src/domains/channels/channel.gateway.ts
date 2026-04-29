@@ -16,7 +16,7 @@ import { logIncident } from '../incidents/incident.service';
 import { pushToDLQ } from '../dlq/dlq.service';
 import { getDefaultTenantId, loadProfissionais, getTenantConfigValue } from '../tenants/tenant.service';
 
-export async function handleIncomingMessage(msg: ChannelMessage): Promise<void> {
+export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ reply: string } | null> {
   try {
     const [identity, tenantId] = await Promise.all([
       resolveIdentity(msg.from, msg.channel),
@@ -25,7 +25,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<void> 
 
     let conversation = await getOrCreateConversation(identity.id, msg.channel);
 
-    if (conversation.status === 'human') return;
+    if (conversation.status === 'human') return null;
 
     conversation = await ensureChatwootConversation(
       conversation,
@@ -104,8 +104,11 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<void> 
       content: botResponse.message,
       channel: msg.channel,
     });
+
+    return { reply: botResponse.message };
   } catch (err) {
     await pushToDLQ('incoming_message', msg, err instanceof Error ? err.message : String(err));
     await logIncident('high', 'channel_gateway_error', String(err));
+    return null;
   }
 }
