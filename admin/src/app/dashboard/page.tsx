@@ -13,7 +13,15 @@ export default async function DashboardPage() {
   return (
     <main className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-3xl mx-auto space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
+          <Link
+            href="/admin/tenants"
+            className="text-sm text-blue-600 hover:underline"
+          >
+            Gerenciar →
+          </Link>
+        </div>
 
         <div className="grid gap-4">
           {(tenants ?? []).map((t: { id: string; name: string; slug: string; active: boolean }) => (
