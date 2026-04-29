@@ -28,7 +28,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<void> 
 
     conversation = await ensureChatwootConversation(
       conversation,
-      msg.from,
+      identity.phoneNormalized,
       identity.name,
     );
 
