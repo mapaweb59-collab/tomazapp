@@ -61,13 +61,15 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<void> 
       customerData: JSON.stringify(identity),
     });
 
+    const extraido = botResponse.extraido ?? {};
+
     const newState = {
       ...conversation.context,
-      fase: botResponse.fase,
-      profissional: botResponse.extraido.profissional ?? conversation.context.profissional,
-      modalidade: botResponse.extraido.modalidade ?? conversation.context.modalidade,
-      horario: botResponse.extraido.horario ?? conversation.context.horario,
-      nomeCliente: botResponse.extraido.nomeCliente ?? conversation.context.nomeCliente,
+      fase: botResponse.fase ?? conversation.context.fase,
+      profissional: extraido.profissional ?? conversation.context.profissional,
+      modalidade: extraido.modalidade ?? conversation.context.modalidade,
+      horario: extraido.horario ?? conversation.context.horario,
+      nomeCliente: extraido.nomeCliente ?? conversation.context.nomeCliente,
     };
 
     if (botResponse.triggerHandoff) {
