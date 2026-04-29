@@ -21,6 +21,18 @@ export async function updateStatusByAsaasId(asaasChargeId: string, status: Payme
   if (error) throw error;
 }
 
+export async function findByAsaasId(asaasChargeId: string): Promise<Payment | null> {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('asaas_charge_id', asaasChargeId)
+    .single();
+
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
+}
+
 export async function findByIdempotencyKey(key: string): Promise<Payment | null> {
   const { data, error } = await supabase
     .from('payments')

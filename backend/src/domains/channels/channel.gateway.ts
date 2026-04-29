@@ -10,12 +10,18 @@ import { saveMessage, getRecentMessages } from '../messages/message.repository';
 import { generateBotResponse } from '../ai/ai.service';
 import { retrieveContext } from '../ai/rag.service';
 import { scheduleAppointment } from '../appointments/appointment.service';
+import { chargeForAppointment } from '../payments/payment.service';
 import { sendMessage, assignAgent } from '../../integrations/chatwoot';
 import { sendWhatsAppMessage } from './whatsapp/whatsapp.sender';
 import { listAvailableSlots, formatSlotsForPrompt } from '../../integrations/google-calendar';
 import { logIncident } from '../incidents/incident.service';
 import { pushToDLQ } from '../dlq/dlq.service';
-import { getDefaultTenantId, loadProfissionais, getTenantConfigValue } from '../tenants/tenant.service';
+import {
+  getDefaultTenantId,
+  loadProfissionais,
+  getTenantConfigValue,
+  getServicePrice,
+} from '../tenants/tenant.service';
 import { Profissional } from '../ai/ai.types';
 
 function findProfissional(
@@ -79,7 +85,6 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
         getTenantConfigValue(tenantId, 'bot.studio_name'),
       ]);
 
-    // Busca slots quando já temos profissional + modalidade ou estamos na fase de horário
     const ctx = conversation.context;
     const shouldFetchSlots =
       ctx.fase === 'coletar_horario' ||
@@ -120,26 +125,39 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
 
     if (botResponse.triggerConfirmacao && newState.horario) {
       const prof = findProfissional(newState.profissional, profissionais);
-      await scheduleAppointment({
-        customerId: identity.id,
-        serviceType: newState.modalidade ?? newState.profissional ?? 'Aula',
-        requestedAt: newState.horario,
-        idempotencyKey: newState.idempotencyKey,
-        professionalId: prof?.gcalCalendarId,
-      }).catch(err => {
-        // Slot tomado — reverte fase para coletar_horario
-        if (err.message === 'SLOT_UNAVAILABLE') {
-          saveContext(conversation.id, { ...newState, fase: 'coletar_horario', horario: null });
+      try {
+        const appointment = await scheduleAppointment({
+          customerId: identity.id,
+          serviceType: newState.modalidade ?? newState.profissional ?? 'Aula',
+          requestedAt: newState.horario,
+          idempotencyKey: newState.idempotencyKey,
+          professionalId: prof?.gcalCalendarId,
+        });
+
+        if (botResponse.triggerPayment && appointment) {
+          const amount = await getServicePrice(tenantId, newState.modalidade);
+          if (amount > 0) {
+            chargeForAppointment(
+              identity.id,
+              appointment.id,
+              amount,
+              `pay_${newState.idempotencyKey}`,
+              identity.name ?? 'Cliente',
+              identity.phoneNormalized,
+            ).catch(() => {});
+          }
         }
-      });
+      } catch (err) {
+        if (err instanceof Error && err.message === 'SLOT_UNAVAILABLE') {
+          await saveContext(conversation.id, { ...newState, fase: 'coletar_horario', horario: null });
+        }
+      }
     }
 
-    // Envia resposta diretamente via Mega API
     if (msg.channel === 'whatsapp') {
       await sendWhatsAppMessage(msg.from, botResponse.message);
     }
 
-    // Espelha no Chatwoot (não crítico)
     if (conversation.chatwoot_conversation_id) {
       await sendMessage(conversation.chatwoot_conversation_id, botResponse.message).catch(() => {});
     }

@@ -3,15 +3,14 @@ import { AppointmentRequest, Appointment } from './appointment.types';
 import { createEvent, checkSlotAvailability } from '../../integrations/google-calendar';
 import { checkEligibility } from '../../integrations/nexfit';
 import { logAudit } from '../audit/audit.service';
+import { reminderQueue } from '../../jobs/reminder.job';
 
 export async function scheduleAppointment(req: AppointmentRequest): Promise<Appointment> {
-  // Idempotência — retorna se já foi criado
   const existing = await findByIdempotencyKey(req.idempotencyKey);
   if (existing) return existing;
 
   const calendarId = req.professionalId ?? 'primary';
 
-  // Verifica disponibilidade antes de criar
   const available = await checkSlotAvailability(req.requestedAt, calendarId);
   if (!available) throw new Error('SLOT_UNAVAILABLE');
 
@@ -42,6 +41,19 @@ export async function scheduleAppointment(req: AppointmentRequest): Promise<Appo
     actor: 'bot',
     after_state: appointment,
   });
+
+  // Schedule 24h-before reminder (fire-and-forget, non-critical)
+  const scheduledAt = new Date(req.requestedAt).getTime();
+  const reminderAt = scheduledAt - 24 * 60 * 60 * 1000;
+  const delay = reminderAt - Date.now();
+  if (delay > 0) {
+    reminderQueue
+      .add('appointment-reminder', { appointmentId: appointment.id }, {
+        delay,
+        jobId: `reminder-${appointment.id}`,
+      })
+      .catch(() => {});
+  }
 
   return appointment;
 }

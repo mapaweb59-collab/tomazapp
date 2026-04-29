@@ -31,6 +31,21 @@ export async function loadProfissionais(tenantId: string): Promise<Profissional[
   }));
 }
 
+export async function getServicePrice(tenantId: string, serviceName: string | null): Promise<number> {
+  if (!serviceName) return 0;
+
+  const { data } = await supabase
+    .from('services')
+    .select('price')
+    .eq('tenant_id', tenantId)
+    .ilike('name', `%${serviceName}%`)
+    .eq('active', true)
+    .limit(1)
+    .single();
+
+  return (data?.price as number) ?? 0;
+}
+
 export async function getTenantConfigValue(
   tenantId: string,
   key: string,
