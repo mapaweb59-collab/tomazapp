@@ -2,15 +2,12 @@
 
 import { useState } from 'react';
 import { createClient } from '../../../lib/supabase/client';
-import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const router = useRouter();
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -22,8 +19,7 @@ export default function LoginPage() {
     if (err) {
       setError('E-mail ou senha incorretos.');
     } else {
-      router.push('/dashboard');
-      router.refresh();
+      window.location.href = '/dashboard';
     }
 
     setLoading(false);
