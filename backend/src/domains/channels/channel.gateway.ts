@@ -13,7 +13,7 @@ import { scheduleAppointment } from '../appointments/appointment.service';
 import { chargeForAppointment } from '../payments/payment.service';
 import { sendMessage, assignAgent } from '../../integrations/chatwoot';
 import { sendWhatsAppMessage } from './whatsapp/whatsapp.sender';
-import { listAvailableSlots, formatSlotsForPrompt } from '../../integrations/google-calendar';
+import { listSlotsForDay, formatSlotsForPrompt } from '../../integrations/google-calendar';
 import { logIncident } from '../incidents/incident.service';
 import { pushToDLQ } from '../dlq/dlq.service';
 import {
@@ -38,27 +38,30 @@ function findProfissional(
   );
 }
 
-async function fetchSlots(
+async function fetchSlotsForDay(
   profissionalNome: string | null,
+  dia: string,                    // YYYY-MM-DD
   profissionais: Profissional[],
   scheduleConfig: Awaited<ReturnType<typeof getTenantScheduleConfig>>,
-): Promise<string> {
+): Promise<{ slotsText: string; wasFallback: boolean; usedDateLabel: string }> {
   try {
     const prof = findProfissional(profissionalNome, profissionais);
     const calendarId = prof?.gcalCalendarId ?? scheduleConfig.sharedCalendarId;
-    // Horário do profissional tem prioridade; fallback para o horário do tenant
     const businessHours = prof?.businessHours ?? scheduleConfig.businessHours;
-    const slots = await listAvailableSlots({
+    const result = await listSlotsForDay(dia, {
       calendarId,
       durationMinutes: scheduleConfig.durationMinutes,
       slotIntervalMinutes: scheduleConfig.slotIntervalMinutes,
       businessHours,
-      daysAhead: 7,
       maxSlots: 5,
     });
-    return formatSlotsForPrompt(slots);
+    return {
+      slotsText: formatSlotsForPrompt(result.slots),
+      wasFallback: result.wasFallback,
+      usedDateLabel: result.usedDateLabel,
+    };
   } catch {
-    return '';
+    return { slotsText: '', wasFallback: false, usedDateLabel: '' };
   }
 }
 
@@ -98,13 +101,25 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       ]);
 
     const ctx = conversation.context;
-    const shouldFetchSlots =
-      ctx.fase === 'coletar_horario' ||
-      (ctx.profissional && ctx.modalidade);
 
-    let availableSlots = shouldFetchSlots
-      ? await fetchSlots(ctx.profissional, profissionais, scheduleConfig)
-      : '';
+    // Busca slots apenas quando temos dia definido (fase coletar_horario)
+    const hasDia = !!(ctx.dia);
+    let availableSlots = '';
+    let slotsFallbackNote = '';
+
+    if (hasDia && ctx.fase === 'coletar_horario') {
+      const { slotsText, wasFallback, usedDateLabel } = await fetchSlotsForDay(
+        ctx.profissional, ctx.dia!, profissionais, scheduleConfig,
+      );
+      availableSlots = slotsText;
+      if (wasFallback && usedDateLabel) {
+        slotsFallbackNote = `ATENÇÃO: não havia vagas no dia pedido. Os horários abaixo são do próximo dia disponível: ${usedDateLabel}.`;
+      }
+    }
+
+    const promptSlots = slotsFallbackNote
+      ? `${slotsFallbackNote}\n${availableSlots}`
+      : availableSlots;
 
     let botResponse = await generateBotResponse(msg.text, {
       assistantName: assistantName ?? 'Sofia',
@@ -112,7 +127,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       profissionais,
       conversationState: JSON.stringify(conversation.context),
       conversationHistory,
-      availableSlots,
+      availableSlots: promptSlots,
       ragContext,
       customerData: JSON.stringify(identity),
     });
@@ -124,22 +139,27 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       fase: botResponse.fase ?? conversation.context.fase,
       profissional: extraido.profissional ?? conversation.context.profissional,
       modalidade: extraido.modalidade ?? conversation.context.modalidade,
+      dia: extraido.dia ?? conversation.context.dia,
       horario: extraido.horario ?? conversation.context.horario,
       nomeCliente: extraido.nomeCliente ?? conversation.context.nomeCliente,
     };
 
-    // Se o LLM decidiu mostrar horários mas não tinha slots na primeira chamada,
-    // busca os slots agora (usando o profissional recém-extraído) e re-chama o LLM.
-    if (botResponse.fase === 'coletar_horario' && !availableSlots && newState.profissional) {
-      availableSlots = await fetchSlots(newState.profissional, profissionais, scheduleConfig);
-      if (availableSlots) {
+    // Se o LLM transitou para coletar_horario e agora temos dia, busca slots e re-chama
+    if (botResponse.fase === 'coletar_horario' && !availableSlots && newState.dia) {
+      const { slotsText, wasFallback, usedDateLabel } = await fetchSlotsForDay(
+        newState.profissional, newState.dia, profissionais, scheduleConfig,
+      );
+      if (slotsText) {
+        const note = wasFallback && usedDateLabel
+          ? `ATENÇÃO: não havia vagas no dia pedido. Os horários abaixo são do próximo dia disponível: ${usedDateLabel}.\n`
+          : '';
         botResponse = await generateBotResponse(msg.text, {
           assistantName: assistantName ?? 'Sofia',
           studioName: studioName ?? 'Studio',
           profissionais,
           conversationState: JSON.stringify(newState),
           conversationHistory,
-          availableSlots,
+          availableSlots: note + slotsText,
           ragContext,
           customerData: JSON.stringify(identity),
         });

@@ -18,7 +18,8 @@ export interface BotResponse {
   extraido: {
     profissional: string | null;
     modalidade: string | null;
-    horario: string | null;
+    dia: string | null;       // YYYY-MM-DD quando cliente informar o dia preferido
+    horario: string | null;   // ISO datetime quando cliente escolher o slot
     nomeCliente: string | null;
   };
   mostrarHorarios: boolean;

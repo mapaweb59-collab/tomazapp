@@ -3,6 +3,7 @@ export type ConversationStatus = 'bot' | 'human' | 'closed';
 export type ConversationPhase =
   | 'livre'
   | 'coletar_modalidade'
+  | 'coletar_dia'
   | 'coletar_horario'
   | 'confirmar'
   | 'concluido'
@@ -12,6 +13,7 @@ export interface ConversationState {
   fase: ConversationPhase;
   profissional: string | null;
   modalidade: string | null;
+  dia: string | null;       // YYYY-MM-DD (BRT) preferido pelo cliente
   horario: string | null;
   slotId: string | null;
   nomeCliente: string | null;

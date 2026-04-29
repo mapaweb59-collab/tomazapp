@@ -13,6 +13,7 @@ const initialState = (): ConversationState => ({
   fase: 'livre',
   profissional: null,
   modalidade: null,
+  dia: null,
   horario: null,
   slotId: null,
   nomeCliente: null,
