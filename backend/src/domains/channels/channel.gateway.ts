@@ -9,7 +9,9 @@ import {
 import { saveMessage, getRecentMessages } from '../messages/message.repository';
 import { generateBotResponse } from '../ai/ai.service';
 import { retrieveContext } from '../ai/rag.service';
-import { scheduleAppointment } from '../appointments/appointment.service';
+import {
+  scheduleAppointment, cancelAppointment, rescheduleAppointment, findUpcomingByCustomer,
+} from '../appointments/appointment.service';
 import { chargeForAppointment } from '../payments/payment.service';
 import { sendMessage, assignAgent } from '../../integrations/chatwoot';
 import { sendWhatsAppMessage } from './whatsapp/whatsapp.sender';
@@ -119,6 +121,54 @@ function buildToolHandlers(deps: {
           return `ERRO: o slot ${horario_iso} acabou de ser ocupado. Peça desculpas e ofereça outro horário (chame buscar_horarios de novo).`;
         }
         return `ERRO ao agendar: ${err instanceof Error ? err.message : String(err)}. Ofereça transferir para atendente.`;
+      }
+    },
+
+    async consultar_meus_agendamentos() {
+      try {
+        const list = await findUpcomingByCustomer(identity.id);
+        if (!list.length) return 'O cliente não tem agendamentos futuros.';
+        const lines = list.map((a, i) => {
+          const dt = new Date(a.scheduled_at);
+          const local = new Date(dt.getTime() - 3 * 60 * 60 * 1000);
+          const dataLabel = `${String(local.getUTCDate()).padStart(2, '0')}/${String(local.getUTCMonth() + 1).padStart(2, '0')} às ${String(local.getUTCHours()).padStart(2, '0')}:${String(local.getUTCMinutes()).padStart(2, '0')}`;
+          return `${i + 1}. ${a.service_type} em ${dataLabel} (id: ${a.id})`;
+        });
+        return `Agendamentos do cliente:\n${lines.join('\n')}`;
+      } catch (err) {
+        return `ERRO ao consultar: ${err instanceof Error ? err.message : String(err)}.`;
+      }
+    },
+
+    async cancelar_agendamento({ appointment_id, motivo }) {
+      try {
+        await cancelAppointment(appointment_id, identity.id, motivo);
+        return `SUCESSO. Agendamento ${appointment_id} cancelado. Confirme ao cliente.`;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === 'APPOINTMENT_NOT_FOUND') return 'ERRO: agendamento não existe. Chame consultar_meus_agendamentos.';
+        if (msg === 'NOT_OWNER') return 'ERRO: esse agendamento não é deste cliente. Recuse e ofereça atendente.';
+        return `ERRO ao cancelar: ${msg}.`;
+      }
+    },
+
+    async reagendar_agendamento({ appointment_id, novo_horario_iso }) {
+      try {
+        // Recupera o profissional/calendar do appointment original via lookup
+        // (o calendarId não é guardado no appointment, então usamos o do estado atual ou primary)
+        const prof = findProfissional(state.profissional, profissionais);
+        await rescheduleAppointment(appointment_id, identity.id, novo_horario_iso, {
+          calendarId: prof?.gcalCalendarId ?? scheduleConfig.sharedCalendarId,
+          professionalName: prof?.nome,
+        });
+        return `SUCESSO. Agendamento movido para ${novo_horario_iso}. Confirme ao cliente.`;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === 'SLOT_UNAVAILABLE') return `ERRO: o novo horário ${novo_horario_iso} já está ocupado. Chame buscar_horarios novamente.`;
+        if (msg === 'APPOINTMENT_NOT_FOUND') return 'ERRO: agendamento não existe.';
+        if (msg === 'NOT_OWNER') return 'ERRO: agendamento não é deste cliente.';
+        if (msg === 'ALREADY_CANCELLED') return 'ERRO: agendamento já foi cancelado.';
+        return `ERRO ao reagendar: ${msg}.`;
       }
     },
 

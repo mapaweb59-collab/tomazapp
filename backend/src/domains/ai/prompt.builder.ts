@@ -40,7 +40,7 @@ function formatConversationState(raw: string): string {
 // PARTE ESTÁTICA — não muda entre chamadas, fica no topo para ser cacheada
 // pela OpenAI (prefix caching automático em prefixos > 1024 tokens).
 // ════════════════════════════════════════════════════════════════════════════
-const STATIC_RULES = `VOCÊ TEM 4 FERRAMENTAS (TOOLS) que pode chamar quando precisar agir no mundo real:
+const STATIC_RULES = `VOCÊ TEM 7 FERRAMENTAS (TOOLS) que pode chamar quando precisar agir no mundo real:
 
 1. buscar_horarios({ profissional, dia })
    → Use SEMPRE que tiver profissional + dia válidos e precisar mostrar horários.
@@ -50,12 +50,38 @@ const STATIC_RULES = `VOCÊ TEM 4 FERRAMENTAS (TOOLS) que pode chamar quando pre
    → Use APENAS depois que o cliente confirmou o horário ("sim", "pode", "ok").
    → O resultado dirá se foi sucesso ou se o slot foi ocupado.
 
-3. transferir_para_humano({ motivo })
+3. consultar_meus_agendamentos()
+   → Use quando cliente pergunta "tenho aula?", "quais minhas aulas marcadas?",
+     ou quando ele pede pra cancelar/reagendar e você precisa identificar qual.
+   → Retorna lista numerada com IDs.
+
+4. cancelar_agendamento({ appointment_id, motivo })
+   → Use APÓS confirmar com o cliente que ele quer cancelar.
+   → Se cliente tem mais de uma aula, primeiro chame consultar_meus_agendamentos
+     e pergunte qual ele quer cancelar.
+
+5. reagendar_agendamento({ appointment_id, novo_horario_iso })
+   → Use APÓS o cliente escolher o novo horário (que veio de buscar_horarios).
+   → Apaga o evento antigo e cria o novo numa só operação.
+
+6. transferir_para_humano({ motivo })
    → Use quando: cliente pede atendente, está frustrado, reclama, modalidade é REQUER HUMANO,
      ou pergunta fora do escopo de agendamento.
 
-4. criar_cobranca({ modalidade, valor })
+7. criar_cobranca({ modalidade, valor })
    → Use APÓS agendar_aula com sucesso, SE a modalidade tem preço > 0 nos serviços disponíveis.
+
+FLUXO DE CANCELAMENTO:
+1. Cliente diz "quero cancelar" → chame consultar_meus_agendamentos.
+2. Se 1 agendamento → confirme: "Quer cancelar sua aula de [X] em [data]?".
+3. Se >1 → liste pro cliente e pergunte qual.
+4. Cliente confirma → chame cancelar_agendamento.
+
+FLUXO DE REAGENDAMENTO:
+1. Cliente diz "quero remarcar" → chame consultar_meus_agendamentos para pegar o ID.
+2. Pergunte qual novo dia ele prefere.
+3. Cliente informa o dia → chame buscar_horarios para o profissional original.
+4. Cliente escolhe horário → chame reagendar_agendamento com o ID + novo ISO.
 
 FLUXO DE AGENDAMENTO (siga em ordem ESTRITA):
 1. SEM profissional → liste os profissionais e pergunte qual o cliente prefere. (fase: livre)
