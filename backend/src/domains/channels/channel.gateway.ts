@@ -160,6 +160,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
     });
 
     const extraido = botResponse.extraido ?? {};
+    console.log('[BOT_RESP_1]', { fase: botResponse.fase, extraido, slotsLen: availableSlots.length });
 
     // Só aceita dia se vier no formato YYYY-MM-DD; senão mantém o anterior
     const novoDia = extraido.dia && ISO_DATE_RE.test(extraido.dia)
@@ -178,9 +179,12 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
 
     // Se o LLM transitou para coletar_horario e agora temos dia válido, busca slots e re-chama
     if (botResponse.fase === 'coletar_horario' && !availableSlots && newState.dia && ISO_DATE_RE.test(newState.dia)) {
+      console.log('[FETCH_SLOTS_2]', { dia: newState.dia, profissional: newState.profissional });
       const { slotsText, wasFallback, usedDateLabel } = await fetchSlotsForDay(
         newState.profissional, newState.dia, profissionais, scheduleConfig,
       );
+      console.log('[FETCH_SLOTS_2_RESULT]', { hasSlots: !!slotsText, wasFallback, usedDateLabel, len: slotsText.length });
+
       if (slotsText) {
         const note = wasFallback && usedDateLabel
           ? `ATENÇÃO: não havia vagas no dia pedido. Os horários abaixo são do próximo dia disponível: ${usedDateLabel}.\n`
@@ -199,7 +203,24 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
           todayIso: dateInfo.todayIso,
           tomorrowIso: dateInfo.tomorrowIso,
         });
+      } else {
+        // Sem slots no dia pedido nem nos próximos 14 dias — fallback útil
+        botResponse = {
+          ...botResponse,
+          message: `Não encontrei vagas disponíveis nas próximas duas semanas para esse dia 😕 Quer que eu te conecte com um atendente?`,
+          fase: 'coletar_dia',
+        };
       }
+    }
+
+    // Se LLM transitou para coletar_horario mas o dia não foi extraído como YYYY-MM-DD
+    if (botResponse.fase === 'coletar_horario' && !availableSlots && (!newState.dia || !ISO_DATE_RE.test(newState.dia))) {
+      console.log('[NO_VALID_DIA]', { rawDia: extraido.dia, savedDia: newState.dia });
+      botResponse = {
+        ...botResponse,
+        message: 'Desculpa, não entendi a data. Pode me dizer um dia específico? Ex: "amanhã", "segunda-feira", "05/05" 😊',
+        fase: 'coletar_dia',
+      };
     }
 
     if (botResponse.triggerHandoff) {
