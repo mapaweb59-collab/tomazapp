@@ -34,7 +34,10 @@ export const TOOLS_DEFINITION = [
         properties: {
           profissional: { type: 'string' },
           modalidade: { type: 'string' },
-          horario_iso: { type: 'string', description: 'Datetime ISO 8601 do slot escolhido' },
+          horario_iso: {
+            type: 'string',
+            description: 'Datetime ISO 8601 EXATO do slot escolhido — copie LITERALMENTE o valor que veio depois de "→" em buscar_horarios, incluindo o "Z" no fim. Ex: "2026-05-04T12:00:00.000Z". NUNCA reescreva o horário em fuso local — sempre use o UTC retornado pela tool.',
+          },
         },
       },
     },
@@ -111,7 +114,9 @@ export const TOOLS_DEFINITION = [
     function: {
       name: 'criar_cobranca',
       description: 'Cria uma cobrança no Asaas para a aula recém agendada. ' +
-        'Use APENAS após agendar_aula com sucesso E se a modalidade tiver preço > 0 nos serviços disponíveis. ' +
+        'IMPORTANTE: chame esta tool APENAS DEPOIS que agendar_aula retornou SUCESSO no MESMO turno. ' +
+        'NUNCA chame em paralelo com agendar_aula — espere o resultado primeiro. ' +
+        'Use apenas se a modalidade tiver preço > 0 nos serviços disponíveis. ' +
         'Se preço = 0 ou serviço não listado, NÃO chame esta tool.',
       parameters: {
         type: 'object',

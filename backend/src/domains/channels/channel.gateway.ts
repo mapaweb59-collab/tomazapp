@@ -56,7 +56,20 @@ function findProfissional(nome: string | null, profissionais: Profissional[]): P
 interface SideEffects {
   handoff: boolean;
   appointmentCreated: boolean;
+  appointmentId?: string;       // setado por agendar_aula, lido por criar_cobranca
   paymentRequested: boolean;
+}
+
+/**
+ * Normaliza ISO datetime: se vier sem timezone, assume BRT (-03:00).
+ * O LLM frequentemente devolve "2026-05-04T10:00:00" (horário local) em vez do
+ * UTC original retornado por buscar_horarios.
+ */
+function normalizeIsoDatetime(input: string): string {
+  // Já tem timezone (Z ou +/-HH:MM no fim)?
+  if (/[Zz]$|[+-]\d{2}:?\d{2}$/.test(input)) return input;
+  // Sem TZ → assume BRT
+  return `${input}-03:00`;
 }
 
 function buildToolHandlers(deps: {
@@ -104,21 +117,24 @@ function buildToolHandlers(deps: {
 
     async agendar_aula({ profissional, modalidade, horario_iso }) {
       const prof = findProfissional(profissional, profissionais);
+      const normalizedIso = normalizeIsoDatetime(horario_iso);
+      console.log('[AGENDAR_AULA]', { input: horario_iso, normalized: normalizedIso });
       try {
         const appointment = await scheduleAppointment({
           customerId: identity.id,
           serviceType: modalidade,
-          requestedAt: horario_iso,
+          requestedAt: normalizedIso,
           idempotencyKey: state.idempotencyKey,
           durationMinutes: scheduleConfig.durationMinutes,
           professionalCalendarId: prof?.gcalCalendarId ?? scheduleConfig.sharedCalendarId,
           professionalName: prof?.nome,
         });
         effects.appointmentCreated = true;
-        return `SUCESSO. Agendamento criado (id: ${appointment.id}). Confirme ao cliente data, horário, profissional e modalidade.`;
+        effects.appointmentId = appointment.id;
+        return `SUCESSO. Agendamento criado (id: ${appointment.id}). Confirme ao cliente data, horário, profissional e modalidade. Se a modalidade tem preço > 0, agora você PODE chamar criar_cobranca.`;
       } catch (err) {
         if (err instanceof Error && err.message === 'SLOT_UNAVAILABLE') {
-          return `ERRO: o slot ${horario_iso} acabou de ser ocupado. Peça desculpas e ofereça outro horário (chame buscar_horarios de novo).`;
+          return `ERRO: o slot ${normalizedIso} acabou de ser ocupado. Peça desculpas e ofereça outro horário (chame buscar_horarios de novo).`;
         }
         return `ERRO ao agendar: ${err instanceof Error ? err.message : String(err)}. Ofereça transferir para atendente.`;
       }
@@ -184,20 +200,32 @@ function buildToolHandlers(deps: {
     },
 
     async criar_cobranca({ modalidade, valor }) {
+      // Pré-condição: agendar_aula precisa ter rodado com sucesso ANTES
+      if (!effects.appointmentId) {
+        return 'ERRO: você precisa chamar agendar_aula com sucesso ANTES de criar_cobranca. Chame agendar_aula primeiro.';
+      }
+      if (valor <= 0) {
+        return 'ERRO: valor deve ser > 0. Confira o preço do serviço na lista de SERVIÇOS DISPONÍVEIS.';
+      }
       effects.paymentRequested = true;
       try {
-        // Cobrança roda em background — não bloqueia resposta ao cliente
-        chargeForAppointment(
+        await chargeForAppointment(
           identity.id,
-          state.idempotencyKey, // appointment_id é setado pelo handler de agendamento
+          effects.appointmentId,
           valor,
           `pay_${state.idempotencyKey}`,
           identity.name ?? 'Cliente',
           identity.phoneNormalized,
-        ).catch(err => console.error('[ASYNC_CHARGE_ERROR]', err));
+        );
         return `Cobrança de R$ ${valor.toFixed(2)} para ${modalidade} criada. O cliente vai receber o link em breve.`;
       } catch (err) {
-        return `ERRO ao criar cobrança: ${err instanceof Error ? err.message : String(err)}.`;
+        const message = err instanceof Error ? err.message : String(err);
+        const code = (err as { code?: string })?.code;
+        console.error('[CRIAR_COBRANCA_ERROR]', { code, message });
+        if (code === 'ERR_INVALID_URL' || /Invalid URL/i.test(message)) {
+          return 'ERRO: integração de pagamento (Asaas) não está configurada (ASAAS_API_URL ausente). Avise o cliente que a aula está agendada e que a cobrança será enviada manualmente.';
+        }
+        return `ERRO ao criar cobrança: ${message}. Avise o cliente que a aula está agendada e que enviará a cobrança em breve.`;
       }
     },
   };
