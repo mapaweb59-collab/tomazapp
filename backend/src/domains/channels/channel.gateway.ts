@@ -182,9 +182,19 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       ? extraido.dia
       : conversation.context.dia;
 
+    // Se acabamos de extrair um dia válido, força a fase para coletar_horario
+    // (o LLM às vezes mantém coletar_dia e trava)
+    const justExtractedValidDia = extraido.dia
+      && ISO_DATE_RE.test(extraido.dia)
+      && extraido.dia !== conversation.context.dia;
+
+    const faseFinal = justExtractedValidDia
+      ? 'coletar_horario' as const
+      : (botResponse.fase ?? conversation.context.fase);
+
     const newState = {
       ...conversation.context,
-      fase: botResponse.fase ?? conversation.context.fase,
+      fase: faseFinal,
       profissional: extraido.profissional ?? conversation.context.profissional,
       modalidade: extraido.modalidade ?? conversation.context.modalidade,
       dia: novoDia,
@@ -192,11 +202,17 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       nomeCliente: extraido.nomeCliente ?? conversation.context.nomeCliente,
     };
 
-    // Se o LLM transitou para coletar_horario e agora temos dia válido, busca slots e re-chama
-    if (botResponse.fase === 'coletar_horario' && !availableSlots && newState.dia && ISO_DATE_RE.test(newState.dia)) {
+    // Re-chama o LLM com slots se: (a) fase é coletar_horario OU (b) acabamos de extrair dia válido
+    // E ainda não temos slots carregados, E o dia é YYYY-MM-DD válido
+    const shouldFetchAndRecall = (botResponse.fase === 'coletar_horario' || justExtractedValidDia)
+      && !availableSlots
+      && newState.dia
+      && ISO_DATE_RE.test(newState.dia);
+
+    if (shouldFetchAndRecall) {
       console.log('[FETCH_SLOTS_2]', { dia: newState.dia, profissional: newState.profissional });
       const { slotsText, wasFallback, usedDateLabel } = await fetchSlotsForDay(
-        newState.profissional, newState.dia, profissionais, scheduleConfig,
+        newState.profissional, newState.dia!, profissionais, scheduleConfig,
       );
       console.log('[FETCH_SLOTS_2_RESULT]', { hasSlots: !!slotsText, wasFallback, usedDateLabel, len: slotsText.length });
 
