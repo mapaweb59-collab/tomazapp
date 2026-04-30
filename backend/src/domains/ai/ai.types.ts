@@ -37,13 +37,24 @@ export interface Profissional {
   businessHours?: Record<string, { open: string; close: string } | null>;
 }
 
+export interface ServicoInfo {
+  nome: string;
+  preco: number;
+  duracaoMin: number;
+  requerHumano: boolean;
+}
+
 export interface PromptContext {
   assistantName: string;
   studioName: string;
   profissionais: Profissional[];
+  servicos: ServicoInfo[];
   conversationState: string;
   conversationHistory: string;
   availableSlots: string;
   ragContext: string;
   customerData: string;
+  today: string;        // ex: "Quarta-feira, 29/04/2026"
+  todayIso: string;     // ex: "2026-04-29"
+  tomorrowIso: string;  // ex: "2026-04-30"
 }

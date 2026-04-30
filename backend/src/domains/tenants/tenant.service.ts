@@ -32,6 +32,28 @@ export async function loadProfissionais(tenantId: string): Promise<Profissional[
   }));
 }
 
+export interface ServiceInfo {
+  nome: string;
+  preco: number;
+  duracaoMin: number;
+  requerHumano: boolean;
+}
+
+export async function loadServices(tenantId: string): Promise<ServiceInfo[]> {
+  const { data } = await supabase
+    .from('services')
+    .select('name, price, duration_minutes, requires_handoff')
+    .eq('tenant_id', tenantId)
+    .eq('active', true);
+
+  return (data ?? []).map(s => ({
+    nome: s.name as string,
+    preco: Number(s.price ?? 0),
+    duracaoMin: Number(s.duration_minutes ?? 60),
+    requerHumano: Boolean(s.requires_handoff),
+  }));
+}
+
 export async function getServicePrice(tenantId: string, serviceName: string | null): Promise<number> {
   if (!serviceName) return 0;
 

@@ -19,11 +19,32 @@ import { pushToDLQ } from '../dlq/dlq.service';
 import {
   getDefaultTenantId,
   loadProfissionais,
+  loadServices,
   getTenantConfigValue,
   getTenantScheduleConfig,
   getServicePrice,
 } from '../tenants/tenant.service';
 import { Profissional } from '../ai/ai.types';
+
+const DAYS_PT_FULL = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+function getBrasiliaDateInfo(): { today: string; todayIso: string; tomorrowIso: string } {
+  const TZ_OFFSET_MS = -3 * 60 * 60 * 1000;
+  const nowLocal = new Date(Date.now() + TZ_OFFSET_MS);
+  const tomorrowLocal = new Date(nowLocal.getTime() + 24 * 60 * 60 * 1000);
+
+  const fmt = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+
+  const todayIso = fmt(nowLocal);
+  const tomorrowIso = fmt(tomorrowLocal);
+  const dayName = DAYS_PT_FULL[nowLocal.getUTCDay()];
+  const todayLabel = `${dayName}, ${String(nowLocal.getUTCDate()).padStart(2, '0')}/${String(nowLocal.getUTCMonth() + 1).padStart(2, '0')}/${nowLocal.getUTCFullYear()}`;
+
+  return { today: todayLabel, todayIso, tomorrowIso };
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function findProfissional(
   nome: string | null,
@@ -90,24 +111,26 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       idempotency_key: msg.id,
     });
 
-    const [ragContext, conversationHistory, profissionais, assistantName, studioName, scheduleConfig] =
+    const [ragContext, conversationHistory, profissionais, servicos, assistantName, studioName, scheduleConfig] =
       await Promise.all([
         retrieveContext(tenantId, msg.text),
         getRecentMessages(conversation.id, 10),
         loadProfissionais(tenantId),
+        loadServices(tenantId),
         getTenantConfigValue(tenantId, 'bot.name'),
         getTenantConfigValue(tenantId, 'bot.studio_name'),
         getTenantScheduleConfig(tenantId),
       ]);
 
+    const dateInfo = getBrasiliaDateInfo();
     const ctx = conversation.context;
 
-    // Busca slots apenas quando temos dia definido (fase coletar_horario)
-    const hasDia = !!(ctx.dia);
+    // Busca slots apenas quando temos dia VÁLIDO (YYYY-MM-DD) e fase coletar_horario
+    const hasValidDia = !!(ctx.dia && ISO_DATE_RE.test(ctx.dia));
     let availableSlots = '';
     let slotsFallbackNote = '';
 
-    if (hasDia && ctx.fase === 'coletar_horario') {
+    if (hasValidDia && ctx.fase === 'coletar_horario') {
       const { slotsText, wasFallback, usedDateLabel } = await fetchSlotsForDay(
         ctx.profissional, ctx.dia!, profissionais, scheduleConfig,
       );
@@ -125,27 +148,36 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       assistantName: assistantName ?? 'Sofia',
       studioName: studioName ?? 'Studio',
       profissionais,
+      servicos,
       conversationState: JSON.stringify(conversation.context),
       conversationHistory,
       availableSlots: promptSlots,
       ragContext,
       customerData: JSON.stringify(identity),
+      today: dateInfo.today,
+      todayIso: dateInfo.todayIso,
+      tomorrowIso: dateInfo.tomorrowIso,
     });
 
     const extraido = botResponse.extraido ?? {};
+
+    // Só aceita dia se vier no formato YYYY-MM-DD; senão mantém o anterior
+    const novoDia = extraido.dia && ISO_DATE_RE.test(extraido.dia)
+      ? extraido.dia
+      : conversation.context.dia;
 
     const newState = {
       ...conversation.context,
       fase: botResponse.fase ?? conversation.context.fase,
       profissional: extraido.profissional ?? conversation.context.profissional,
       modalidade: extraido.modalidade ?? conversation.context.modalidade,
-      dia: extraido.dia ?? conversation.context.dia,
+      dia: novoDia,
       horario: extraido.horario ?? conversation.context.horario,
       nomeCliente: extraido.nomeCliente ?? conversation.context.nomeCliente,
     };
 
-    // Se o LLM transitou para coletar_horario e agora temos dia, busca slots e re-chama
-    if (botResponse.fase === 'coletar_horario' && !availableSlots && newState.dia) {
+    // Se o LLM transitou para coletar_horario e agora temos dia válido, busca slots e re-chama
+    if (botResponse.fase === 'coletar_horario' && !availableSlots && newState.dia && ISO_DATE_RE.test(newState.dia)) {
       const { slotsText, wasFallback, usedDateLabel } = await fetchSlotsForDay(
         newState.profissional, newState.dia, profissionais, scheduleConfig,
       );
@@ -157,11 +189,15 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
           assistantName: assistantName ?? 'Sofia',
           studioName: studioName ?? 'Studio',
           profissionais,
+          servicos,
           conversationState: JSON.stringify(newState),
           conversationHistory,
           availableSlots: note + slotsText,
           ragContext,
           customerData: JSON.stringify(identity),
+          today: dateInfo.today,
+          todayIso: dateInfo.todayIso,
+          tomorrowIso: dateInfo.tomorrowIso,
         });
       }
     }
