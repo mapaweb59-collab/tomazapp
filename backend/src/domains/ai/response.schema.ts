@@ -6,10 +6,7 @@ export const BOT_RESPONSE_SCHEMA = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: [
-      'intent', 'fase', 'message', 'extraido',
-      'mostrarHorarios', 'triggerHandoff', 'triggerPayment', 'triggerConfirmacao',
-    ],
+    required: ['intent', 'fase', 'message', 'extraido'],
     properties: {
       intent: {
         type: 'string',
@@ -34,10 +31,6 @@ export const BOT_RESPONSE_SCHEMA = {
           nomeCliente:  { type: ['string', 'null'] },
         },
       },
-      mostrarHorarios:   { type: 'boolean' },
-      triggerHandoff:    { type: 'boolean' },
-      triggerPayment:    { type: 'boolean' },
-      triggerConfirmacao:{ type: 'boolean' },
     },
   },
 } as const;

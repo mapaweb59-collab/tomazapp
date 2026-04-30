@@ -22,10 +22,6 @@ export interface BotResponse {
     horario: string | null;   // ISO datetime quando cliente escolher o slot
     nomeCliente: string | null;
   };
-  mostrarHorarios: boolean;
-  triggerHandoff: boolean;
-  triggerPayment: boolean;
-  triggerConfirmacao: boolean;
 }
 
 export interface Profissional {
@@ -51,7 +47,6 @@ export interface PromptContext {
   servicos: ServicoInfo[];
   conversationState: string;
   conversationHistory: string;
-  availableSlots: string;
   ragContext: string;
   customerData: string;
   today: string;        // ex: "Quarta-feira, 29/04/2026"
