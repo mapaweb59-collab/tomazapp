@@ -94,10 +94,16 @@ ${ctx.ragContext}`);
   "triggerConfirmacao": false
 }
 
-FLUXO DE AGENDAMENTO (siga em ordem):
-1. Falta profissional → pergunte (fase: livre)
-2. Falta modalidade e prof tem >1 especialidade → pergunte (fase: coletar_modalidade)
-3. Falta dia → pergunte "Que dia você prefere? 😊" (fase: coletar_dia)
+FLUXO DE AGENDAMENTO (siga em ordem ESTRITA — NUNCA pule etapas):
+1. SEM profissional definido no ESTADO ATUAL → você DEVE perguntar o profissional ANTES de qualquer outra coisa.
+   Motivo: cada profissional tem sua própria agenda no Google Calendar. Sem saber qual prof, é IMPOSSÍVEL buscar horários.
+   - Se cliente disse "quero agendar" sem nome, liste os profissionais disponíveis e pergunte qual prefere.
+   - Se cliente disse "qual modalidade tem" mas não escolheu prof, RESPONDA listando profissionais (não modalidades) e diga "Cada profissional tem suas modalidades — qual deles?".
+   - JAMAIS pergunte modalidade enquanto profissional estiver null.
+   (fase: livre)
+2. Tem profissional, mas falta modalidade e prof tem >1 especialidade → liste APENAS as especialidades daquele prof e pergunte qual. (fase: coletar_modalidade)
+3. Tem profissional + modalidade, falta dia → pergunte "Que dia você prefere? 😊" (fase: coletar_dia).
+   Se cliente perguntar "qual dia tem?" → diga que faz agenda nos próximos 7 dias e peça pra ele indicar uma preferência (ex: "amanhã", "segunda", "dia 5"). NUNCA fique repetindo a mesma pergunta.
 4. Cliente informa o dia → CONVERTA para YYYY-MM-DD usando HOJE (ISO) acima como referência:
    - "amanhã" → AMANHÃ (ISO) literal
    - "hoje" → HOJE (ISO) literal
@@ -136,7 +142,9 @@ REGRAS ABSOLUTAS:
 10. SELEÇÃO DE HORÁRIO: quando cliente escolher uma opção, salve extraido.horario com o ISO exato (após "→") do slot escolhido.
 11. LOOP PROIBIDO: se você já listou os slots na sua última mensagem, NÃO liste de novo.
 12. DIA → SEMPRE YYYY-MM-DD. Se não conseguir converter, deixe null e pergunte de novo gentilmente.
-13. SE O CLIENTE SÓ DISSER "ok" / "sim" / "valeu" e não houver pergunta pendente sua, e o estado mostra que falta alguma etapa, AVANCE para essa etapa (ex: se já tem profissional+modalidade mas falta dia, pergunte o dia). NÃO cumprimente como se fosse uma conversa nova.`);
+13. SE O CLIENTE SÓ DISSER "ok" / "sim" / "valeu" e não houver pergunta pendente sua, e o estado mostra que falta alguma etapa, AVANCE para essa etapa (ex: se já tem profissional+modalidade mas falta dia, pergunte o dia). NÃO cumprimente como se fosse uma conversa nova.
+14. PROFISSIONAL ANTES DE TUDO: se ESTADO ATUAL mostra "profissional: null", a PRÓXIMA pergunta DEVE ser sobre profissional. Mesmo se cliente perguntar sobre modalidades, dias, horários, ou preços — você primeiro lista os profissionais e explica que cada um atende coisas diferentes. SEM PROFISSIONAL = SEM AGENDA POSSÍVEL.
+15. NÃO REPETIR PERGUNTAS: se você acabou de perguntar X na sua última mensagem do histórico, e o cliente respondeu algo que NÃO é a resposta direta de X (ex: ele perguntou de volta "qual tem?"), responda a dúvida dele com informação útil — NUNCA simplesmente repita a mesma pergunta. Repetir = falha grave.`);
 
   return sections.join('\n\n');
 }
