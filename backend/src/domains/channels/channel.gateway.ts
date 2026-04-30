@@ -207,7 +207,17 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
     }
 
     if (msg.channel === 'whatsapp') {
-      await sendWhatsAppMessage(msg.from, botResponse.message);
+      try {
+        await sendWhatsAppMessage(msg.from, botResponse.message);
+      } catch (sendErr: unknown) {
+        const errData = (sendErr as { response?: { status?: number; data?: unknown } })?.response;
+        console.error('[WA_SEND_ERROR]', {
+          to: msg.from,
+          status: errData?.status,
+          body: errData?.data,
+          message: sendErr instanceof Error ? sendErr.message : String(sendErr),
+        });
+      }
     }
 
     if (conversation.chatwoot_conversation_id) {
