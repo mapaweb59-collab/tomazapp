@@ -65,10 +65,17 @@ async function fetchSlotsForDay(
   profissionais: Profissional[],
   scheduleConfig: Awaited<ReturnType<typeof getTenantScheduleConfig>>,
 ): Promise<{ slotsText: string; wasFallback: boolean; usedDateLabel: string }> {
+  const prof = findProfissional(profissionalNome, profissionais);
+  const calendarId = prof?.gcalCalendarId ?? scheduleConfig.sharedCalendarId;
+  const businessHours = prof?.businessHours ?? scheduleConfig.businessHours;
+
+  console.log('[SLOTS_QUERY]', {
+    profissionalNome, dia, calendarId,
+    bhKeys: Object.keys(businessHours),
+    duration: scheduleConfig.durationMinutes,
+  });
+
   try {
-    const prof = findProfissional(profissionalNome, profissionais);
-    const calendarId = prof?.gcalCalendarId ?? scheduleConfig.sharedCalendarId;
-    const businessHours = prof?.businessHours ?? scheduleConfig.businessHours;
     const result = await listSlotsForDay(dia, {
       calendarId,
       durationMinutes: scheduleConfig.durationMinutes,
@@ -76,12 +83,20 @@ async function fetchSlotsForDay(
       businessHours,
       maxSlots: 5,
     });
+    console.log('[SLOTS_RESULT]', {
+      count: result.slots.length, wasFallback: result.wasFallback, usedDate: result.usedDate,
+    });
     return {
       slotsText: formatSlotsForPrompt(result.slots),
       wasFallback: result.wasFallback,
       usedDateLabel: result.usedDateLabel,
     };
-  } catch {
+  } catch (err) {
+    console.error('[SLOTS_ERROR]', {
+      calendarId, dia,
+      message: err instanceof Error ? err.message : String(err),
+      response: (err as { response?: { status?: number; data?: unknown } })?.response?.data,
+    });
     return { slotsText: '', wasFallback: false, usedDateLabel: '' };
   }
 }

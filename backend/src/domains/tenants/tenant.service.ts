@@ -92,6 +92,14 @@ export interface TenantScheduleConfig {
   sharedCalendarId: string;
 }
 
+function parseJsonbValue<T>(raw: unknown): T | null {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+  return raw as T;
+}
+
 export async function getTenantScheduleConfig(tenantId: string): Promise<TenantScheduleConfig> {
   const { data: rows } = await supabase
     .from('tenant_config')
@@ -104,21 +112,28 @@ export async function getTenantScheduleConfig(tenantId: string): Promise<TenantS
       'gcal.calendar_id',
     ]);
 
-  const cfg: Record<string, string> = {};
-  for (const row of rows ?? []) cfg[row.key] = row.value as string;
+  const cfg: Record<string, unknown> = {};
+  for (const row of rows ?? []) cfg[row.key] = row.value;
 
-  const businessHours =
-    cfg['schedule.business_hours']
-      ? (JSON.parse(cfg['schedule.business_hours']) as Record<
-          string,
-          { open: string; close: string } | null
-        >)
-      : {};
+  const businessHours = parseJsonbValue<Record<string, { open: string; close: string } | null>>(
+    cfg['schedule.business_hours'],
+  ) ?? {};
+
+  const sharedCalendarId = typeof cfg['gcal.calendar_id'] === 'string'
+    ? (cfg['gcal.calendar_id'] as string)
+    : 'primary';
+
+  console.log('[SCHEDULE_CONFIG]', {
+    tenantId,
+    sharedCalendarId,
+    businessHoursKeys: Object.keys(businessHours),
+    duration: cfg['schedule.default_duration'],
+  });
 
   return {
     durationMinutes: Number(cfg['schedule.default_duration'] ?? 60),
     slotIntervalMinutes: Number(cfg['schedule.slot_interval'] ?? 60),
     businessHours,
-    sharedCalendarId: cfg['gcal.calendar_id'] ?? 'primary',
+    sharedCalendarId,
   };
 }
