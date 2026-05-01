@@ -20,8 +20,10 @@ export async function saveBotConfig(slug: string, formData: FormData) {
     'bot.tone': formData.get('tone') as string,
     'bot.welcome_message': formData.get('welcome_message') as string,
     'bot.handoff_message': formData.get('handoff_message') as string,
+    'rag.content': formData.get('rag_content') as string,
   };
 
   await api.patch(`/api/tenants/${tenantId}/config`, config);
+  await api.post(`/api/tenants/${tenantId}/rag/sync`);
   revalidatePath(`/${slug}/bot`);
 }

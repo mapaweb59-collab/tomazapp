@@ -156,10 +156,15 @@ CREATE TABLE rag_chunks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   source_id TEXT NOT NULL,
+  source_page_id TEXT,
+  source_title TEXT,
+  source_updated_at TIMESTAMPTZ,
+  chunk_index INT NOT NULL DEFAULT 0,
   content TEXT NOT NULL,
   embedding vector(1536),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(source_id)
+  last_synced_at TIMESTAMPTZ,
+  UNIQUE(tenant_id, source_id, chunk_index)
 );
 
 CREATE INDEX ON rag_chunks USING ivfflat (embedding vector_cosine_ops);

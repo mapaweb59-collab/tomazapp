@@ -22,6 +22,22 @@ async function setPaymentEnabled(tenantId: string, slug: string, formData: FormD
   revalidatePath(`/${slug}/integracoes`);
 }
 
+async function saveNotionLeadConfig(tenantId: string, slug: string, formData: FormData) {
+  'use server';
+  const token = String(formData.get('notion_token') ?? '').trim();
+  const databaseId = String(formData.get('notion_leads_database_id') ?? '').trim();
+
+  const config: Record<string, string | boolean> = {
+    'notion.leads_enabled': formData.get('notion_leads_enabled') === 'on',
+    'notion.leads_database_id': databaseId,
+  };
+
+  if (token) config['notion.token'] = token;
+
+  await api.patch(`/api/tenants/${tenantId}/config`, config);
+  revalidatePath(`/${slug}/integracoes`);
+}
+
 function StatusBadge({ ok }: { ok: boolean }) {
   return (
     <span className={`text-xs font-medium px-2 py-1 rounded-full ${ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -61,6 +77,8 @@ export default async function IntegracoesPage({ params }: Props) {
   const reconnectAction = reconnect.bind(null, params.tenantSlug);
   const paymentEnabled = cfg['payment.enabled'] === 'true' || (cfg['payment.enabled'] as unknown) === true;
   const togglePaymentAction = tenant ? setPaymentEnabled.bind(null, tenant.id, params.tenantSlug) : null;
+  const notionLeadsEnabled = cfg['notion.leads_enabled'] === 'true' || (cfg['notion.leads_enabled'] as unknown) === true;
+  const notionLeadAction = tenant ? saveNotionLeadConfig.bind(null, tenant.id, params.tenantSlug) : null;
 
   return (
     <div className="space-y-6">
@@ -133,6 +151,53 @@ export default async function IntegracoesPage({ params }: Props) {
           <p className="text-sm text-gray-500">
             {cfg['nexfit.api_key'] ? 'API Key configurada' : 'Não configurado'}
           </p>
+        </IntegrationCard>
+
+        {/* Notion Leads */}
+        <IntegrationCard title="Notion (Leads)">
+          <div className="flex items-center justify-between">
+            <StatusBadge ok={notionLeadsEnabled && !!cfg['notion.token'] && !!cfg['notion.leads_database_id']} />
+            <span className="text-xs text-gray-400">
+              {notionLeadsEnabled ? 'Ativo' : 'Opcional'}
+            </span>
+          </div>
+
+          {notionLeadAction && (
+            <form action={notionLeadAction} className="space-y-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="notion_leads_enabled"
+                  defaultChecked={notionLeadsEnabled}
+                  className="rounded border-gray-300"
+                />
+                Criar lead no Notion quando um contato novo entrar
+              </label>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Token da integração</label>
+                <input
+                  name="notion_token"
+                  type="password"
+                  placeholder={cfg['notion.token'] ? 'Token já configurado' : 'secret_...'}
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Database ID de leads</label>
+                <input
+                  name="notion_leads_database_id"
+                  defaultValue={cfg['notion.leads_database_id'] ?? ''}
+                  className="w-full border rounded-lg px-3 py-2 text-sm font-mono"
+                />
+              </div>
+
+              <button type="submit" className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">
+                Salvar Notion
+              </button>
+            </form>
+          )}
         </IntegrationCard>
 
         {/* Chatwoot */}

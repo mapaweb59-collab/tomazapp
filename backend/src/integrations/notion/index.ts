@@ -1,38 +1,56 @@
 import { Client } from '@notionhq/client';
+import { getTenantConfigValue } from '../../domains/tenants/tenant.service';
+import { CustomerIdentity, ChannelType } from '../../domains/customers/customer.types';
 
-const notion = new Client({ auth: process.env.NOTION_TOKEN });
-
-export interface NotionChunk {
-  id: string;
-  text: string;
+interface NotionLeadConfig {
+  enabled: boolean;
+  token?: string;
+  databaseId?: string;
 }
 
-export async function getNotionChunks(tenantId: string): Promise<NotionChunk[]> {
-  const databaseId = process.env.NOTION_DATABASE_ID!;
+async function getNotionLeadConfig(tenantId: string): Promise<NotionLeadConfig> {
+  const [enabled, token, databaseId] = await Promise.all([
+    getTenantConfigValue(tenantId, 'notion.leads_enabled'),
+    getTenantConfigValue(tenantId, 'notion.token'),
+    getTenantConfigValue(tenantId, 'notion.leads_database_id'),
+  ]);
 
-  const { results } = await notion.databases.query({ database_id: databaseId });
-
-  return results
-    .filter((page): page is typeof page & { id: string } => 'id' in page)
-    .map(page => ({
-      id: `${tenantId}::${page.id}`,
-      text: extractPlainText(page),
-    }))
-    .filter(chunk => chunk.text.length > 0);
+  return {
+    enabled: enabled === 'true' || (enabled as unknown) === true,
+    token,
+    databaseId,
+  };
 }
 
-function extractPlainText(page: unknown): string {
-  const p = page as Record<string, unknown>;
-  const props = p['properties'] as Record<string, unknown> | undefined;
-  if (!props) return '';
+export async function createLeadInNotionIfEnabled(
+  tenantId: string,
+  lead: CustomerIdentity,
+  channel: ChannelType,
+): Promise<void> {
+  const config = await getNotionLeadConfig(tenantId);
+  if (!config.enabled || !config.token || !config.databaseId) return;
 
-  return Object.values(props)
-    .map(prop => {
-      const p = prop as { type?: string; title?: Array<{ plain_text: string }>; rich_text?: Array<{ plain_text: string }> };
-      if (p.type === 'title') return p.title?.map(t => t.plain_text).join('') ?? '';
-      if (p.type === 'rich_text') return p.rich_text?.map(t => t.plain_text).join('') ?? '';
-      return '';
-    })
-    .join(' ')
-    .trim();
+  const notion = new Client({ auth: config.token });
+  const title = lead.name ?? lead.phoneNormalized;
+
+  await notion.pages.create({
+    parent: { database_id: config.databaseId },
+    properties: {
+      Nome: {
+        title: [{ text: { content: title } }],
+      },
+      Telefone: {
+        rich_text: [{ text: { content: lead.phoneNormalized } }],
+      },
+      Canal: {
+        select: { name: channel },
+      },
+      Origem: {
+        rich_text: [{ text: { content: 'AtendenteTomaz' } }],
+      },
+      Criado: {
+        date: { start: new Date().toISOString() },
+      },
+    },
+  } as Parameters<typeof notion.pages.create>[0]);
 }

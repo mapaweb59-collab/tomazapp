@@ -19,7 +19,7 @@ export default async function BotPage({ params }: Props) {
   const save = saveBotConfig.bind(null, params.tenantSlug);
 
   return (
-    <div className="space-y-6 max-w-xl">
+    <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold text-gray-900">Identidade do Bot</h1>
 
       <form action={save} className="bg-white rounded-xl shadow-sm p-6 space-y-4">
@@ -68,6 +68,20 @@ export default async function BotPage({ params }: Props) {
             defaultValue={cfg['bot.handoff_message'] ?? 'Vou te conectar com um atendente. Em breve alguém entra em contato! 😊'}
             className="w-full border rounded-lg px-3 py-2 text-sm resize-none"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Base de conhecimento do RAG</label>
+          <textarea
+            name="rag_content"
+            rows={12}
+            defaultValue={cfg['rag.content'] ?? ''}
+            className="w-full border rounded-lg px-3 py-2 text-sm resize-y font-mono"
+            placeholder="Cole aqui FAQs, regras, planos, políticas e informações que o bot deve consultar."
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Ao salvar, o conteúdo será reprocessado para busca vetorial.
+          </p>
         </div>
 
         <button

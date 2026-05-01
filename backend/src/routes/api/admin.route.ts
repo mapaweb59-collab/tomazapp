@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../../lib/supabase';
 import { getInstanceStatus, getQrCode } from '../../integrations/megaapi';
-import { ragSyncQueue } from '../../jobs/rag-sync.job';
+import { syncRagContentToVectors } from '../../domains/ai/rag.service';
 
 export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
   // ─── Tenants ────────────────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     const today = new Date().toISOString().split('T')[0];
 
-    const [conversations, appointments, handoffs, dlqPending] = await Promise.all([
+    const [conversations, appointments, handoffs, dlqPending, professionals, lastRagSync] = await Promise.all([
       supabase
         .from('conversations')
         .select('id', { count: 'exact', head: true })
@@ -201,16 +201,27 @@ export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
         .from('dead_letter_queue')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'pending'),
+      supabase
+        .from('professionals')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', id)
+        .eq('active', true),
+      supabase
+        .from('rag_chunks')
+        .select('last_synced_at')
+        .eq('tenant_id', id)
+        .order('last_synced_at', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
-
-    // suppress unused id param warning
-    void id;
 
     return reply.send({
       conversations: conversations.count ?? 0,
       appointments: appointments.count ?? 0,
       handoffs: handoffs.count ?? 0,
       dlqPending: dlqPending.count ?? 0,
+      professionalsCount: professionals.count ?? 0,
+      lastRagSync: lastRagSync.data?.last_synced_at ?? null,
     });
   });
 
@@ -273,7 +284,7 @@ export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/api/tenants/:id/rag/sync', async (req, reply) => {
     const { id } = req.params as { id: string };
-    await ragSyncQueue.add('manual-sync', { tenantId: id });
-    return reply.send({ ok: true });
+    const result = await syncRagContentToVectors(id);
+    return reply.send({ ok: true, ...result });
   });
 }

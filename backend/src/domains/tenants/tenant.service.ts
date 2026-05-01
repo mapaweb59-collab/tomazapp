@@ -15,6 +15,16 @@ export async function getDefaultTenantId(): Promise<string> {
   return data.id;
 }
 
+export async function listActiveTenantIds(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('tenants')
+    .select('id')
+    .eq('active', true);
+
+  if (error) throw new Error(`Failed to list active tenants: ${error.message}`);
+  return (data ?? []).map(row => row.id as string);
+}
+
 export async function loadProfissionais(tenantId: string): Promise<Profissional[]> {
   const { data } = await supabase
     .from('professionals')
@@ -104,6 +114,22 @@ export async function getTenantConfigValue(
 
   return data?.value as string | undefined;
 }
+
+export async function getTenantRagSyncIntervalHours(tenantId: string): Promise<number> {
+  const { data: rows } = await supabase
+    .from('tenant_config')
+    .select('key, value')
+    .eq('tenant_id', tenantId)
+    .in('key', ['rag.sync_interval_hours', 'notion.sync_interval_hours']);
+
+  const cfg: Record<string, unknown> = {};
+  for (const row of rows ?? []) cfg[row.key] = row.value;
+
+  const value = cfg['rag.sync_interval_hours'] ?? cfg['notion.sync_interval_hours'];
+  const interval = typeof value === 'number' ? value : Number(value ?? 6);
+  return Number.isFinite(interval) && interval > 0 ? interval : 6;
+}
+
 
 export interface TenantScheduleConfig {
   durationMinutes: number;

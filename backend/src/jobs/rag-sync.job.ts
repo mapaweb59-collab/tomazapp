@@ -1,6 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { queueConnection, createWorkerConnection } from '../lib/redis';
-import { syncNotionToVectors } from '../domains/ai/rag.service';
+import { syncRagContentToVectors } from '../domains/ai/rag.service';
 import { logIncident } from '../domains/incidents/incident.service';
 
 export const ragSyncQueue = new Queue('rag-sync', { connection: queueConnection });
@@ -8,7 +8,7 @@ export const ragSyncQueue = new Queue('rag-sync', { connection: queueConnection 
 export const ragSyncWorker = new Worker(
   'rag-sync',
   async job => {
-    await syncNotionToVectors(job.data.tenantId);
+    return syncRagContentToVectors(job.data.tenantId);
   },
   {
     connection: createWorkerConnection(),

@@ -10,7 +10,7 @@ import { ragSyncWorker, ragSyncQueue } from './jobs/rag-sync.job';
 import { reminderWorker } from './jobs/reminder.job';
 import { dlqRetryWorker, dlqRetryQueue } from './jobs/dlq-retry.job';
 import { whatsappMonitorWorker, whatsappMonitorQueue } from './jobs/whatsapp-monitor.job';
-import { getDefaultTenantId } from './domains/tenants/tenant.service';
+import { getTenantRagSyncIntervalHours, listActiveTenantIds } from './domains/tenants/tenant.service';
 
 const app = Fastify({
   logger: {
@@ -46,15 +46,18 @@ const start = async () => {
       whatsappMonitorWorker.waitUntilReady(),
     ]);
 
-    const tenantId = await getDefaultTenantId();
+    const tenantIds = await listActiveTenantIds();
 
-    // RAG sync: immediate + every 6h
-    await ragSyncQueue.add('initial-sync', { tenantId }, { jobId: `initial-${tenantId}` });
-    await ragSyncQueue.upsertJobScheduler(
-      `rag-sync-${tenantId}`,
-      { every: 6 * 60 * 60 * 1000 },
-      { name: 'scheduled-sync', data: { tenantId } },
-    );
+    // RAG sync: immediate + tenant-configured interval
+    for (const tenantId of tenantIds) {
+      const intervalHours = await getTenantRagSyncIntervalHours(tenantId);
+      await ragSyncQueue.add('initial-sync', { tenantId }, { jobId: `initial-${tenantId}` });
+      await ragSyncQueue.upsertJobScheduler(
+        `rag-sync-${tenantId}`,
+        { every: intervalHours * 60 * 60 * 1000 },
+        { name: 'scheduled-sync', data: { tenantId } },
+      );
+    }
 
     // DLQ retry: every 30 minutes
     await dlqRetryQueue.upsertJobScheduler(

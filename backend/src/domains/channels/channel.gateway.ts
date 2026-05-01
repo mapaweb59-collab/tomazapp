@@ -9,6 +9,7 @@ import {
 import { saveMessage, getRecentMessages } from '../messages/message.repository';
 import { generateBotResponse } from '../ai/ai.service';
 import { retrieveContext } from '../ai/rag.service';
+import { shouldRetrieveRagContext } from '../ai/rag.utils';
 import {
   scheduleAppointment, cancelAppointment, rescheduleAppointment, findUpcomingByCustomer,
 } from '../appointments/appointment.service';
@@ -243,10 +244,8 @@ function buildToolHandlers(deps: {
 
 export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ reply: string } | null> {
   try {
-    const [identity, tenantId] = await Promise.all([
-      resolveIdentity(msg.from, msg.channel),
-      getDefaultTenantId(),
-    ]);
+    const tenantId = await getDefaultTenantId();
+    const identity = await resolveIdentity(msg.from, msg.channel, undefined, tenantId);
 
     let conversation = await getOrCreateConversation(identity.id, msg.channel);
     if (conversation.status === 'human') return null;
@@ -265,7 +264,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
 
     const [ragContext, conversationHistory, profissionais, servicos, assistantName, studioName, scheduleConfig, paymentConfig] =
       await Promise.all([
-        retrieveContext(tenantId, msg.text),
+        shouldRetrieveRagContext(msg.text) ? retrieveContext(tenantId, msg.text) : Promise.resolve(''),
         getRecentMessages(conversation.id, 10),
         loadProfissionais(tenantId),
         loadServices(tenantId),
