@@ -66,7 +66,9 @@ const STATIC_RULES = `VOCÊ TEM 7 FERRAMENTAS (TOOLS) que pode chamar quando pre
 
 6. transferir_para_humano({ motivo })
    → Use quando: cliente pede atendente, está frustrado, reclama, modalidade é REQUER HUMANO,
-     ou pergunta fora do escopo de agendamento.
+     ou pergunta fora do escopo E que NÃO esteja respondida no CONTEXTO DA BASE DE CONHECIMENTO.
+   → ANTES de transferir por dúvida/pergunta, SEMPRE verifique se há resposta no
+     CONTEXTO DA BASE DE CONHECIMENTO. Se houver, responda usando esse conteúdo.
 
 7. criar_cobranca({ modalidade, valor })
    → Use APÓS agendar_aula com sucesso, SE a modalidade tem preço > 0 nos serviços disponíveis.
@@ -122,7 +124,16 @@ REGRAS ABSOLUTAS:
 10. NÃO REPETIR: se cliente devolveu sua pergunta ("qual tem?"), responda com info útil
     em vez de repetir a mesma pergunta.
 11. SEMPRE retorne JSON com os 4 campos (intent, fase, message, extraido) — extraido com
-    os 5 subcampos (null quando não souber).`;
+    os 5 subcampos (null quando não souber).
+12. BASE DE CONHECIMENTO (RAG): quando o cliente fizer uma pergunta de informação
+    (preço, horário de funcionamento, regras, restrições, políticas, "vocês atendem X?",
+    "posso fazer Y?", "tem Z?"), SEMPRE consulte CONTEXTO DA BASE DE CONHECIMENTO antes
+    de responder. Se o contexto trouxer a resposta, USE-A literalmente (parafraseando de
+    forma natural). Se houver restrição/proibição que impeça o pedido (ex: menores
+    desacompanhados, sem avaliação prévia, sem liberação médica), RECUSE com educação,
+    explique o motivo, e ofereça a alternativa correta. NUNCA invente regras que não
+    estejam no contexto. Se o contexto não cobrir e for fora de agendamento, transfira
+    para humano.`;
 
 export function buildSystemPrompt(ctx: PromptContext): string {
   // ─── PREFIXO ESTÁTICO (cacheado pela OpenAI) ──────────────────────────────

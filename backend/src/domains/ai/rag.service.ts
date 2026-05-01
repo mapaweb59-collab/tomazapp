@@ -6,7 +6,7 @@ import { getTenantConfigValue } from '../tenants/tenant.service';
 
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const EMBEDDING_BATCH_SIZE = 96;
-const MATCH_THRESHOLD = 0.6;
+const MATCH_THRESHOLD = 0.35;
 const MATCH_COUNT = 5;
 
 export async function syncRagContentToVectors(tenantId: string): Promise<{ chunksSynced: number }> {
@@ -77,5 +77,12 @@ export async function retrieveContext(tenantId: string, query: string): Promise<
     throw new Error(`Failed to retrieve RAG context for tenant ${tenantId}: ${error.message}`);
   }
 
-  return (data ?? []).map((r: { content: string }) => r.content).join('\n\n');
+  const hits = data ?? [];
+  console.log('[RAG_RETRIEVE]', {
+    query,
+    hits: hits.length,
+    topSimilarity: hits[0]?.similarity ?? null,
+  });
+
+  return hits.map((r: { content: string }) => r.content).join('\n\n');
 }
