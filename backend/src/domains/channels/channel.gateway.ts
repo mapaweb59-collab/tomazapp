@@ -24,6 +24,7 @@ import {
   loadServices,
   getTenantConfigValue,
   getTenantScheduleConfig,
+  getTenantPaymentConfig,
 } from '../tenants/tenant.service';
 import { Profissional } from '../ai/ai.types';
 import { ToolHandlers } from '../ai/tools';
@@ -75,15 +76,16 @@ function normalizeIsoDatetime(input: string): string {
 function buildToolHandlers(deps: {
   profissionais: Profissional[];
   scheduleConfig: Awaited<ReturnType<typeof getTenantScheduleConfig>>;
+  paymentConfig: Awaited<ReturnType<typeof getTenantPaymentConfig>>;
   identity: Awaited<ReturnType<typeof resolveIdentity>>;
   state: ConversationState;
   effects: SideEffects;
   conversationId: string;
   chatwootConversationId?: string;
 }): ToolHandlers {
-  const { profissionais, scheduleConfig, identity, state, effects, conversationId, chatwootConversationId } = deps;
+  const { profissionais, scheduleConfig, paymentConfig, identity, state, effects, conversationId, chatwootConversationId } = deps;
 
-  return {
+  const handlers: ToolHandlers = {
     async buscar_horarios({ profissional, dia }) {
       if (!ISO_DATE_RE.test(dia)) return `ERRO: dia deve ser YYYY-MM-DD, recebi "${dia}".`;
 
@@ -229,6 +231,14 @@ function buildToolHandlers(deps: {
       }
     },
   };
+
+  // Se o tenant não tem cobrança automática habilitada, remove a tool da lista
+  // (assim o LLM nem sabe que ela existe e não tenta chamar).
+  if (!paymentConfig.enabled) {
+    delete handlers.criar_cobranca;
+  }
+
+  return handlers;
 }
 
 export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ reply: string } | null> {
@@ -253,7 +263,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       idempotency_key: msg.id,
     });
 
-    const [ragContext, conversationHistory, profissionais, servicos, assistantName, studioName, scheduleConfig] =
+    const [ragContext, conversationHistory, profissionais, servicos, assistantName, studioName, scheduleConfig, paymentConfig] =
       await Promise.all([
         retrieveContext(tenantId, msg.text),
         getRecentMessages(conversation.id, 10),
@@ -262,14 +272,18 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
         getTenantConfigValue(tenantId, 'bot.name'),
         getTenantConfigValue(tenantId, 'bot.studio_name'),
         getTenantScheduleConfig(tenantId),
+        getTenantPaymentConfig(tenantId),
       ]);
 
     const dateInfo = getBrasiliaDateInfo();
     const effects: SideEffects = { handoff: false, appointmentCreated: false, paymentRequested: false };
 
+    console.log('[TENANT_FEATURES]', { paymentEnabled: paymentConfig.enabled, environment: paymentConfig.environment });
+
     const handlers = buildToolHandlers({
       profissionais,
       scheduleConfig,
+      paymentConfig,
       identity,
       state: conversation.context,
       effects,

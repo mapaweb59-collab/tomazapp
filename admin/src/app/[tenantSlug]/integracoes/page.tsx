@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { api } from '../../../lib/api';
 import { createAdminClient } from '../../../lib/supabase/admin-client';
 import { revalidatePath } from 'next/cache';
+import { PaymentToggle } from './PaymentToggle';
 
 interface Props { params: { tenantSlug: string } }
 
@@ -11,6 +12,13 @@ interface WaStatus { connected: boolean; qrcode?: string }
 async function reconnect(slug: string) {
   'use server';
   await api.post('/api/whatsapp/reconnect');
+  revalidatePath(`/${slug}/integracoes`);
+}
+
+async function setPaymentEnabled(tenantId: string, slug: string, formData: FormData) {
+  'use server';
+  const enabled = formData.get('enabled') === 'on';
+  await api.patch(`/api/tenants/${tenantId}/config`, { 'payment.enabled': enabled });
   revalidatePath(`/${slug}/integracoes`);
 }
 
@@ -51,6 +59,8 @@ export default async function IntegracoesPage({ params }: Props) {
   const waStatus = await api.get<WaStatus>('/api/whatsapp/status').catch((): WaStatus => ({ connected: false }));
 
   const reconnectAction = reconnect.bind(null, params.tenantSlug);
+  const paymentEnabled = cfg['payment.enabled'] === 'true' || (cfg['payment.enabled'] as unknown) === true;
+  const togglePaymentAction = tenant ? setPaymentEnabled.bind(null, tenant.id, params.tenantSlug) : null;
 
   return (
     <div className="space-y-6">
@@ -109,6 +119,10 @@ export default async function IntegracoesPage({ params }: Props) {
           <p className="text-sm text-gray-500">
             API Key: {cfg['asaas.api_key'] ? '••••••••' + cfg['asaas.api_key'].slice(-4) : 'Não configurado'}
           </p>
+
+          {togglePaymentAction && (
+            <PaymentToggle enabled={paymentEnabled} action={togglePaymentAction} />
+          )}
         </IntegrationCard>
 
         {/* Nexfit */}

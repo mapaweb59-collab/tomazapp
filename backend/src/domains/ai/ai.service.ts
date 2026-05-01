@@ -27,11 +27,17 @@ export async function generateBotResponse(
     { role: 'user', content: userMessage },
   ];
 
+  // Filtra TOOLS_DEFINITION para incluir só as que têm handler definido.
+  // Ex: criar_cobranca é removida quando o tenant não tem payment.enabled.
+  const enabledTools = TOOLS_DEFINITION.filter(t =>
+    handlers[t.function.name as ToolName] !== undefined,
+  );
+
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const completion = await openai.chat.completions.create({
       model,
       messages,
-      tools: TOOLS_DEFINITION,
+      tools: enabledTools,
       response_format: { type: 'json_schema', json_schema: BOT_RESPONSE_SCHEMA },
       temperature: 0.4,
     });

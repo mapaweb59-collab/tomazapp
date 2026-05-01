@@ -69,6 +69,28 @@ export async function getServicePrice(tenantId: string, serviceName: string | nu
   return (data?.price as number) ?? 0;
 }
 
+export interface TenantPaymentConfig {
+  enabled: boolean;          // bot pode acionar cobrança automática?
+  environment: 'production' | 'sandbox';
+}
+
+export async function getTenantPaymentConfig(tenantId: string): Promise<TenantPaymentConfig> {
+  const { data: rows } = await supabase
+    .from('tenant_config')
+    .select('key, value')
+    .eq('tenant_id', tenantId)
+    .in('key', ['payment.enabled', 'asaas.environment']);
+
+  const cfg: Record<string, unknown> = {};
+  for (const row of rows ?? []) cfg[row.key] = row.value;
+
+  // Default: desabilitado (seguro — exige opt-in explícito)
+  const enabled = cfg['payment.enabled'] === true || cfg['payment.enabled'] === 'true';
+  const environment = cfg['asaas.environment'] === 'production' ? 'production' : 'sandbox';
+
+  return { enabled, environment };
+}
+
 export async function getTenantConfigValue(
   tenantId: string,
   key: string,

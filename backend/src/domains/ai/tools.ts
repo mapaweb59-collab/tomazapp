@@ -138,7 +138,8 @@ export interface ToolHandlers {
   cancelar_agendamento: (args: { appointment_id: string; motivo: string }) => Promise<string>;
   reagendar_agendamento: (args: { appointment_id: string; novo_horario_iso: string }) => Promise<string>;
   transferir_para_humano: (args: { motivo: string }) => Promise<string>;
-  criar_cobranca: (args: { modalidade: string; valor: number }) => Promise<string>;
+  // Opcional: só presente quando o tenant tem payment.enabled = true
+  criar_cobranca?: (args: { modalidade: string; valor: number }) => Promise<string>;
 }
 
 export type ToolName = keyof ToolHandlers;
