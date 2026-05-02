@@ -26,6 +26,9 @@ export interface SimulatorResult {
   newState: ConversationState;
   toolCalls: { name: string; args: unknown; result: string }[];
   effects: { handoff: boolean; appointmentCreated: boolean; paymentRequested: boolean };
+  conversationId: string;
+  sessionId: string;
+  warning?: string;
 }
 
 async function getTenantId(slug: string): Promise<string> {
@@ -39,6 +42,7 @@ export async function sendSimulatorMessage(
   slug: string,
   payload: {
     message: string;
+    sessionId?: string;
     state?: ConversationState;
     history?: { role: 'user' | 'assistant'; content: string }[];
   },

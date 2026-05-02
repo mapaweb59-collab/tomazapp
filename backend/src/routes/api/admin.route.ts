@@ -296,6 +296,7 @@ export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     const body = req.body as {
       message: string;
+      sessionId?: string;
       state?: ConversationState;
       history?: { role: 'user' | 'assistant'; content: string }[];
     };
@@ -308,6 +309,7 @@ export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
       const result = await runSimulatedChat({
         tenantId: id,
         message: body.message,
+        sessionId: body.sessionId,
         state: body.state,
         history: body.history,
       });

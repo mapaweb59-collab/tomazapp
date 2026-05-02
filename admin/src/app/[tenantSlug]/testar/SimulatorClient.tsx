@@ -47,6 +47,10 @@ function generateIdempotencyKey(): string {
   return `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function generateSessionId(): string {
+  return `sim_session_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function SimulatorClient({ tenantSlug, botName, welcomeMessage }: Props) {
   const initialMessages: ChatMessage[] = welcomeMessage
     ? [{ role: 'assistant', content: welcomeMessage }]
@@ -58,10 +62,16 @@ export function SimulatorClient({ tenantSlug, botName, welcomeMessage }: Props) 
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [showDebug, setShowDebug] = useState(true);
+  const [sessionId, setSessionId] = useState('');
 
   // idempotencyKey só é gerado no cliente para evitar hydration mismatch
   useEffect(() => {
     setState(s => (s.idempotencyKey ? s : { ...s, idempotencyKey: generateIdempotencyKey() }));
+    const storageKey = `simulator-session:${tenantSlug}`;
+    const existing = window.localStorage.getItem(storageKey);
+    const next = existing || generateSessionId();
+    window.localStorage.setItem(storageKey, next);
+    setSessionId(next);
   }, []);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -74,19 +84,22 @@ export function SimulatorClient({ tenantSlug, botName, welcomeMessage }: Props) 
     if (!text || isPending) return;
 
     const userMsg: ChatMessage = { role: 'user', content: text };
-    const history = messages.map(m => ({ role: m.role, content: m.content }));
-
     setMessages(m => [...m, userMsg]);
     setInput('');
     setError(null);
 
     startTransition(async () => {
       try {
+        const activeSessionId = sessionId || generateSessionId();
+        if (!sessionId) {
+          window.localStorage.setItem(`simulator-session:${tenantSlug}`, activeSessionId);
+          setSessionId(activeSessionId);
+        }
         const result: SimulatorResult = await sendSimulatorMessage(tenantSlug, {
           message: text,
-          state,
-          history,
+          sessionId: activeSessionId,
         });
+        setSessionId(result.sessionId);
         setState(result.newState);
         setMessages(m => [
           ...m,
@@ -105,6 +118,9 @@ export function SimulatorClient({ tenantSlug, botName, welcomeMessage }: Props) 
   };
 
   const onReset = () => {
+    const nextSessionId = generateSessionId();
+    window.localStorage.setItem(`simulator-session:${tenantSlug}`, nextSessionId);
+    setSessionId(nextSessionId);
     setMessages(initialMessages);
     setState(freshState(generateIdempotencyKey()));
     setError(null);
@@ -210,10 +226,10 @@ export function SimulatorClient({ tenantSlug, botName, welcomeMessage }: Props) 
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 leading-relaxed">
-          <p className="font-medium mb-1">⚠ Modo simulação</p>
+          <p className="font-medium mb-1">Modo simulação real</p>
           <p>
-            Agendamentos, cancelamentos, transferências e cobranças são <b>fingidos</b> — apenas o
-            LLM, o RAG e a busca de horários no Google Calendar usam dados reais.
+            Este chat usa o mesmo fluxo do WhatsApp e persiste dados no banco. Agendamentos e
+            cobranças são reais; apenas o envio externo para WhatsApp/Chatwoot fica bloqueado.
           </p>
         </div>
       </aside>

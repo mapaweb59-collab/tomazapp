@@ -14,6 +14,12 @@ export class MaxToolIterationsError extends Error {
 
 const MAX_TOOL_ITERATIONS = 12;
 
+export interface ToolLoopControls {
+  getAllowedTools?: () => ToolName[] | null;
+  getFinalizationInstruction?: () => string | null;
+  onToolResult?: (trace: { name: string; args: unknown; result: string }) => void;
+}
+
 function pickModel(ctx: PromptContext): string {
   if (process.env.OPENAI_MODEL) return process.env.OPENAI_MODEL;
   const state = JSON.parse(ctx.conversationState || '{}');
@@ -25,6 +31,7 @@ export async function generateBotResponse(
   userMessage: string,
   ctx: PromptContext,
   handlers: ToolHandlers,
+  controls: ToolLoopControls = {},
 ): Promise<BotResponse> {
   const systemPrompt = buildSystemPrompt(ctx);
   const model = pickModel(ctx);
@@ -41,10 +48,15 @@ export async function generateBotResponse(
   );
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    const allowedTools = controls.getAllowedTools?.();
+    const activeTools = allowedTools
+      ? enabledTools.filter(t => allowedTools.includes(t.function.name as ToolName))
+      : enabledTools;
+
     const completion = await openai.chat.completions.create({
       model,
       messages,
-      tools: enabledTools,
+      ...(activeTools.length ? { tools: activeTools } : {}),
       response_format: { type: 'json_schema', json_schema: BOT_RESPONSE_SCHEMA },
       temperature: 0.4,
     });
@@ -65,8 +77,9 @@ export async function generateBotResponse(
       msg.tool_calls.map(async call => {
         const name = call.function.name as ToolName;
         let result: string;
+        let args: unknown = call.function.arguments;
         try {
-          const args = JSON.parse(call.function.arguments);
+          args = JSON.parse(call.function.arguments);
           const handler = handlers[name];
           if (!handler) {
             result = `ERRO: tool ${name} não implementada.`;
@@ -77,12 +90,18 @@ export async function generateBotResponse(
           result = `ERRO ao executar ${name}: ${err instanceof Error ? err.message : String(err)}`;
         }
         console.log('[TOOL_RESULT]', { name, result: result.slice(0, 200) });
+        controls.onToolResult?.({ name, args, result });
         return { call_id: call.id, content: result };
       }),
     );
 
     for (const r of results) {
       messages.push({ role: 'tool', tool_call_id: r.call_id, content: r.content });
+    }
+
+    const finalizationInstruction = controls.getFinalizationInstruction?.();
+    if (finalizationInstruction) {
+      messages.push({ role: 'system', content: finalizationInstruction });
     }
   }
 

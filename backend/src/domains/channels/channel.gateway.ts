@@ -27,12 +27,38 @@ import {
   getTenantScheduleConfig,
   getTenantPaymentConfig,
 } from '../tenants/tenant.service';
-import { Profissional } from '../ai/ai.types';
+import { BotResponse, Profissional } from '../ai/ai.types';
 import { ToolHandlers } from '../ai/tools';
 import { ConversationState } from '../conversations/conversation.types';
 
 const DAYS_PT_FULL = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface ToolCallTrace {
+  name: string;
+  args: unknown;
+  result: string;
+}
+
+export interface ChannelGatewayOptions {
+  tenantId?: string;
+  skipExternalDelivery?: boolean;
+  throwOnError?: boolean;
+  toolCalls?: ToolCallTrace[];
+}
+
+export interface ChannelGatewayResult {
+  reply: string;
+  botResponse: BotResponse;
+  conversationId: string;
+  state: ConversationState;
+  toolCalls: ToolCallTrace[];
+  effects: {
+    handoff: boolean;
+    appointmentCreated: boolean;
+    paymentRequested: boolean;
+  };
+}
 
 function getBrasiliaDateInfo(): { today: string; todayIso: string; tomorrowIso: string } {
   const TZ_OFFSET_MS = -3 * 60 * 60 * 1000;
@@ -148,7 +174,12 @@ function buildToolHandlers(deps: {
         });
         effects.appointmentCreated = true;
         effects.appointmentId = appointment.id;
-        return `SUCESSO. Agendamento criado (id: ${appointment.id}). Confirme ao cliente data, horário, profissional e modalidade. Se a modalidade tem preço > 0, agora você PODE chamar criar_cobranca.`;
+        return [
+          `SUCESSO. Agendamento criado (id: ${appointment.id}).`,
+          'NÃO chame buscar_horarios novamente.',
+          'Se houver cobrança automática aplicável, chame criar_cobranca uma única vez;',
+          'caso contrário, retorne o JSON final com fase "concluido" confirmando data, horário, profissional e modalidade.',
+        ].join(' ');
       } catch (err) {
         if (err instanceof Error && err.message === 'SLOT_UNAVAILABLE') {
           return `ERRO: o slot ${normalizedIso} acabou de ser ocupado. Peça desculpas e ofereça outro horário (chame buscar_horarios de novo).`;
@@ -256,17 +287,22 @@ function buildToolHandlers(deps: {
   return handlers;
 }
 
-export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ reply: string } | null> {
+export async function handleIncomingMessage(
+  msg: ChannelMessage,
+  options: ChannelGatewayOptions = {},
+): Promise<ChannelGatewayResult | null> {
   try {
-    const tenantId = await getDefaultTenantId();
+    const tenantId = options.tenantId ?? await getDefaultTenantId();
     const identity = await resolveIdentity(msg.from, msg.channel, undefined, tenantId);
 
     let conversation = await getOrCreateConversation(identity.id, msg.channel);
     if (conversation.status === 'human') return null;
 
-    conversation = await ensureChatwootConversation(
-      conversation, identity.phoneNormalized, identity.name,
-    );
+    if (!options.skipExternalDelivery) {
+      conversation = await ensureChatwootConversation(
+        conversation, identity.phoneNormalized, identity.name,
+      );
+    }
 
     await saveMessage({
       conversation_id: conversation.id,
@@ -290,6 +326,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
 
     const dateInfo = getBrasiliaDateInfo();
     const effects: SideEffects = { handoff: false, appointmentCreated: false, paymentRequested: false };
+    const toolCalls = options.toolCalls ?? [];
 
     console.log('[TENANT_FEATURES]', { paymentEnabled: paymentConfig.enabled, environment: paymentConfig.environment });
 
@@ -320,6 +357,31 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
         tomorrowIso: dateInfo.tomorrowIso,
       },
       handlers,
+      {
+        getAllowedTools: () => {
+          if (effects.paymentRequested) return [];
+          if (effects.appointmentCreated) {
+            return handlers.criar_cobranca ? ['criar_cobranca'] : [];
+          }
+          return null;
+        },
+        getFinalizationInstruction: () => {
+          if (!effects.appointmentCreated && !effects.paymentRequested) return null;
+          const paymentText = effects.paymentRequested
+            ? 'A cobrança também já foi gerada.'
+            : 'Não chame mais tools neste turno.';
+          return [
+            'AÇÃO DE AGENDAMENTO JÁ EXECUTADA COM SUCESSO.',
+            paymentText,
+            'Agora retorne APENAS o JSON final, sem tool calls, com fase "concluido".',
+            'A mensagem ao cliente deve confirmar o agendamento já realizado com profissional, modalidade, data e horário.',
+            'Se não houve cobrança automática, não prometa link de pagamento.',
+          ].join(' ');
+        },
+        onToolResult: trace => {
+          toolCalls.push(trace);
+        },
+      },
     );
 
     const extraido = botResponse.extraido ?? {};
@@ -346,7 +408,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
     }
 
     // Envio da mensagem
-    if (msg.channel === 'whatsapp') {
+    if (!options.skipExternalDelivery && msg.channel === 'whatsapp') {
       try {
         await sendWhatsAppMessage(msg.from, botResponse.message);
       } catch (sendErr: unknown) {
@@ -360,7 +422,7 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       }
     }
 
-    if (conversation.chatwoot_conversation_id) {
+    if (!options.skipExternalDelivery && conversation.chatwoot_conversation_id) {
       await sendMessage(conversation.chatwoot_conversation_id, botResponse.message).catch(() => {});
     }
 
@@ -371,10 +433,18 @@ export async function handleIncomingMessage(msg: ChannelMessage): Promise<{ repl
       channel: msg.channel,
     });
 
-    return { reply: botResponse.message };
+    return {
+      reply: botResponse.message,
+      botResponse,
+      conversationId: conversation.id,
+      state: newState,
+      toolCalls,
+      effects,
+    };
   } catch (err) {
     await pushToDLQ('incoming_message', msg, err instanceof Error ? err.message : String(err));
     await logIncident('high', 'channel_gateway_error', String(err));
+    if (options.throwOnError) throw err;
     return null;
   }
 }
