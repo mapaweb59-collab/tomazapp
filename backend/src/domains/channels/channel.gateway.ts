@@ -55,6 +55,14 @@ function findProfissional(nome: string | null, profissionais: Profissional[]): P
   );
 }
 
+function professionalCoversModality(prof: Profissional, modalidade: string): boolean {
+  const target = modalidade.toLowerCase().trim();
+  return prof.especialidades.some(e => {
+    const esp = e.toLowerCase().trim();
+    return esp === target || esp.includes(target) || target.includes(esp);
+  });
+}
+
 interface SideEffects {
   handoff: boolean;
   appointmentCreated: boolean;
@@ -100,7 +108,7 @@ function buildToolHandlers(deps: {
           durationMinutes: scheduleConfig.durationMinutes,
           slotIntervalMinutes: scheduleConfig.slotIntervalMinutes,
           businessHours,
-          maxSlots: 5,
+          maxSlots: 20,
         });
 
         if (!result.slots.length) {
@@ -119,7 +127,13 @@ function buildToolHandlers(deps: {
     },
 
     async agendar_aula({ profissional, modalidade, horario_iso }) {
+      if (state.fase !== 'confirmar') {
+        return `ERRO: o cliente ainda não confirmou o agendamento. Antes de chamar agendar_aula, mostre ao cliente os dados completos (${profissional}, ${modalidade}, horário ${horario_iso}) e pergunte "Está correto? Confirma com 'ok'?". Mude fase para "confirmar" e ESPERE a próxima mensagem dele. NÃO chame agendar_aula agora.`;
+      }
       const prof = findProfissional(profissional, profissionais);
+      if (prof && !professionalCoversModality(prof, modalidade)) {
+        return `ERRO: ${prof.nome} não atende ${modalidade}. Especialidades de ${prof.nome}: ${prof.especialidades.join(', ')}. Avise o cliente e pergunte se quer trocar de profissional ou modalidade. NÃO tente agendar de novo até o cliente decidir.`;
+      }
       const normalizedIso = normalizeIsoDatetime(horario_iso);
       console.log('[AGENDAR_AULA]', { input: horario_iso, normalized: normalizedIso });
       try {

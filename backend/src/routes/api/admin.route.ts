@@ -2,6 +2,8 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../../lib/supabase';
 import { getInstanceStatus, getQrCode } from '../../integrations/megaapi';
 import { syncRagContentToVectors } from '../../domains/ai/rag.service';
+import { runSimulatedChat } from '../../domains/ai/simulator.service';
+import { ConversationState } from '../../domains/conversations/conversation.types';
 
 export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
   // ─── Tenants ────────────────────────────────────────────────────────────────
@@ -286,5 +288,34 @@ export async function adminApiRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     const result = await syncRagContentToVectors(id);
     return reply.send({ ok: true, ...result });
+  });
+
+  // ─── Simulator (testar bot) ──────────────────────────────────────────────────
+
+  app.post('/api/tenants/:id/simulator/chat', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      message: string;
+      state?: ConversationState;
+      history?: { role: 'user' | 'assistant'; content: string }[];
+    };
+
+    if (!body?.message?.trim()) {
+      return reply.status(400).send({ error: 'message é obrigatório' });
+    }
+
+    try {
+      const result = await runSimulatedChat({
+        tenantId: id,
+        message: body.message,
+        state: body.state,
+        history: body.history,
+      });
+      return reply.send(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[SIMULATOR_ERROR]', message);
+      return reply.status(500).send({ error: message });
+    }
   });
 }

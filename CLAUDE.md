@@ -24,7 +24,8 @@ Construir um sistema que permita ao cliente final:
 | Orquestração de IA  | LangChain ou LlamaIndex                            |
 | LLM principal       | GPT-4o mini (fluxos simples) / GPT-4o (complexos) |
 | Embeddings (RAG)    | text-embedding-3-small (OpenAI)                    |
-| RAG fonte           | Notion API + pgvector (Supabase)                   |
+| RAG fonte           | Conteúdo editado no painel admin + pgvector (Supabase) |
+| Leads (CRM)         | Notion API (destino de leads gerados no chat)      |
 | Banco principal     | Supabase (PostgreSQL)                              |
 | Fila / DLQ          | BullMQ (Redis) + tabela DLQ no Supabase            |
 | WhatsApp            | Evolution API (self-hosted) → Chatwoot             |
@@ -46,12 +47,13 @@ Canais de entrada (WA, IG, TikTok, Site, Messenger)
         ↓
   Gateway de entrada (normalização de payload → ChannelMessage)
         ↓
-  Motor de IA (LLM + RAG Notion + histórico de conversa)
+  Motor de IA (LLM + RAG do painel admin + histórico de conversa)
         ↓
   Roteador de intenções
     ├── Agenda (Google Calendar + Nexfit)
     ├── Pagamento (Asaas)
-    ├── FAQ/RAG (Notion)
+    ├── FAQ/RAG (conteúdo do painel admin via pgvector)
+    ├── Captura de leads (Notion como CRM)
     └── Handoff humano (Chatwoot agent)
         ↓
   Serviços internos (identidade, locks, idempotência)
@@ -231,7 +233,8 @@ Homologação: 7 dias após entrega
 Critérios:
 - [ ] WhatsApp e Chatwoot operacionais (entrada e saída)
 - [ ] Identidade do cliente funcionando sem duplicação (phone_normalized como chave)
-- [ ] RAG operacional consultando base do Notion via pgvector
+- [ ] RAG operacional consultando a base de conhecimento editada no painel admin (pgvector)
+- [ ] Integração com Notion ativa para registrar leads gerados no chat
 - [ ] Handoff humano funcional e reativação segura com contexto preservado
 - [ ] Logs mínimos e tabela de incidentes funcionando
 
@@ -239,10 +242,11 @@ Implementar nesta ordem:
 1. Infra base: Supabase, tabelas, variáveis de ambiente
 2. Evolution API + Chatwoot: webhook, inbox configurado
 3. Deduplicação de cliente: upsert por phone_normalized
-4. RAG: sync Notion → chunks → embeddings → pgvector
+4. RAG: conteúdo editado no painel admin → chunks → embeddings → pgvector (re-embedding ao salvar)
 5. Motor de IA: LLM + retriever + histórico
 6. Handoff: detecção de intenção → atribuição Chatwoot → reativação
 7. Logs e incidentes: middleware de observabilidade
+8. Notion (CRM de leads): salvar contato/lead capturado no chat no database Notion configurado por tenant
 
 ### Marco 2 — Motor de Agenda (R$ 700,00)
 Homologação: 7 dias após entrega
@@ -320,6 +324,12 @@ Critérios:
 - Subir canais novos (TikTok, Instagram) com flag desativada até validação completa
 - Usar variável de ambiente: `FEATURE_TIKTOK_ENABLED=false`
 
+### RAG e Notion — divisão de responsabilidades
+- A **base de conhecimento do bot** (FAQ, regras, modalidades) é editada pelo cliente do studio dentro do painel admin, em `/[tenantSlug]/bot`, e persistida em `tenant_config['rag.content']`.
+- Esse conteúdo é dividido em chunks, embeddado e indexado em pgvector (Supabase) — é a fonte exclusiva do RAG.
+- O **Notion não é fonte de RAG**. O Notion é usado apenas como destino de leads gerados na conversa: quando o bot detecta um lead (nome + contato + interesse), grava no database Notion configurado por tenant (`notion.leads_database_id`).
+- Re-embedding ocorre automaticamente ao salvar `rag.content` no painel; também há endpoint manual `POST /api/tenants/:id/rag/reindex`.
+
 ---
 
 ## Variáveis de Ambiente Necessárias
@@ -332,7 +342,7 @@ SUPABASE_SERVICE_KEY=
 # OpenAI
 OPENAI_API_KEY=
 
-# Notion (RAG)
+# Notion (CRM de leads — opcional, configurado por tenant)
 NOTION_TOKEN=
 NOTION_DATABASE_ID=
 
@@ -734,9 +744,11 @@ CREATE TABLE services (
 | `nexfit.api_key` | string (encrypted) | Chave API Nexfit |
 | `nexfit.check_eligibility` | boolean | Verificar elegibilidade |
 | `nexfit.ineligible_action` | string | `block` \| `handoff` |
-| `notion.token` | string (encrypted) | Token de integração Notion |
-| `notion.database_id` | string | ID do banco de dados Notion |
-| `notion.sync_interval_hours` | number | Intervalo de re-sync (1, 6, 24) |
+| `notion.token` | string (encrypted) | Token de integração Notion (destino de leads) |
+| `notion.leads_database_id` | string | ID do database Notion onde leads serão salvos |
+| `notion.enabled` | boolean | Liga/desliga envio de leads para o Notion |
+| `rag.content` | text | Conteúdo da base de conhecimento do bot (FAQ, regras do studio, descrições de modalidades) — editado no painel |
+| `rag.last_indexed_at` | timestamp | Última vez que `rag.content` foi rechunked + reembeddado |
 | `schedule.default_duration` | number | Duração padrão em minutos |
 | `schedule.slot_interval` | number | Intervalo entre slots em minutos |
 | `schedule.cancel_policy_hours` | number | Horas mínimas para cancelar |
@@ -747,8 +759,9 @@ CREATE TABLE services (
 
 #### 1. Dashboard (visão geral por tenant)
 - Métricas do dia: conversas, agendamentos, handoffs, erros DLQ
-- Status de todas as conexões (WhatsApp, GCal, Asaas, Nexfit, Notion)
-- Botão de sync manual do RAG
+- Status de todas as conexões (WhatsApp, GCal, Asaas, Nexfit, Chatwoot, Notion)
+- Botão de re-indexar RAG (rechunk + re-embedding do conteúdo do painel)
+- Indicador da última indexação (`rag.last_indexed_at`)
 - Seletor de tenant no topo (dropdown)
 
 #### 2. Identidade do bot
@@ -756,7 +769,7 @@ CREATE TABLE services (
 - Tom de comunicação (select)
 - Mensagem de boas-vindas (textarea com preview)
 - Mensagem de handoff
-- Configuração do Notion (token + database_id + intervalo de sync)
+- **Base de conhecimento (RAG)**: editor de texto rico para `rag.content` (FAQ, regras, modalidades). Ao salvar, o backend reprocessa chunks e embeddings automaticamente. Mostra contador de caracteres, número de chunks gerados e timestamp da última indexação.
 - Botão "testar bot" → abre simulação de chat lateral
 
 #### 3. Profissionais
@@ -788,6 +801,7 @@ CREATE TABLE services (
 - **Nexfit:** API key + toggle elegibilidade + ação se inelegível
 - **Chatwoot:** URL + API key + inbox ID + agentes online
 - **Telegram:** bot token + chat ID para alertas
+- **Notion (CRM de leads):** token (mascarado) + database_id de leads + toggle ativar/desativar envio de leads
 
 #### 7. Fila de erros (DLQ)
 - Lista de eventos com falha: tipo + mensagem de erro + tentativas + timestamp
@@ -838,7 +852,7 @@ POST   /api/tenants/:id/services             → criar serviço
 PATCH  /api/tenants/:id/services/:sid        → editar serviço
 
 GET    /api/tenants/:id/status               → status de todas as conexões
-POST   /api/tenants/:id/rag/sync             → forçar re-sync do Notion
+POST   /api/tenants/:id/rag/reindex          → forçar rechunk + re-embedding de rag.content
 POST   /api/tenants/:id/whatsapp/reconnect   → reconectar WhatsApp
 GET    /api/tenants/:id/whatsapp/qr          → obter QR code atual
 

@@ -12,6 +12,7 @@ interface Props {
 const navItems = [
   { label: 'Dashboard',        href: 'dashboard',     key: 'D' },
   { label: 'Identidade do Bot', href: 'bot',          key: 'I' },
+  { label: 'Testar Bot',       href: 'testar',        key: 'T' },
   { label: 'Profissionais',    href: 'profissionais', key: 'P' },
   { label: 'Serviços',         href: 'servicos',      key: 'S' },
   { label: 'Horários',         href: 'horarios',      key: 'H' },

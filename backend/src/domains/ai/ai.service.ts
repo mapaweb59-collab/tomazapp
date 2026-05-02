@@ -5,7 +5,14 @@ import { BOT_RESPONSE_SCHEMA } from './response.schema';
 import { TOOLS_DEFINITION, ToolHandlers, ToolName } from './tools';
 import { BotResponse, PromptContext } from './ai.types';
 
-const MAX_TOOL_ITERATIONS = 5;
+export class MaxToolIterationsError extends Error {
+  constructor(public readonly iterations: number) {
+    super(`Max tool iterations (${iterations}) atingido sem resposta final do LLM`);
+    this.name = 'MaxToolIterationsError';
+  }
+}
+
+const MAX_TOOL_ITERATIONS = 12;
 
 function pickModel(ctx: PromptContext): string {
   if (process.env.OPENAI_MODEL) return process.env.OPENAI_MODEL;
@@ -79,5 +86,5 @@ export async function generateBotResponse(
     }
   }
 
-  throw new Error(`Max tool iterations (${MAX_TOOL_ITERATIONS}) atingido sem resposta final do LLM`);
+  throw new MaxToolIterationsError(MAX_TOOL_ITERATIONS);
 }
